@@ -12,6 +12,8 @@ import {
   type Variant,
 } from "@/lib/analytics";
 import { encodeAnswers } from "@/lib/share";
+import { captureEntry } from "@/lib/pilot/attribution";
+import { recordCompletedAudit } from "@/lib/pilot/client";
 import {
   EMPTY_ANSWERS,
   isStepComplete,
@@ -38,6 +40,12 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
   // Restore a draft, or load a demo profile when one is requested.
   useEffect(() => {
     const variant: Variant = currentVariant() ?? "A";
+    // A visitor can land straight on /audit from an outreach link, so
+    // attribution is captured here too rather than only on the landing page.
+    captureEntry(
+      new URLSearchParams(window.location.search),
+      demoId ? "demo" : "direct",
+    );
     const demo = demoId ? profileById(demoId) : undefined;
     if (demo) {
       setAnswers(demo.answers);
@@ -107,11 +115,19 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
       );
       // Banded dimensions only — no raw collections, no free text.
       const result = runAudit(final);
+      const durationMs = Date.now() - startedAt.current;
       track({
         name: "audit_completed",
-        durationMs: Date.now() - startedAt.current,
+        durationMs,
         dimensions: reportDimensions(result),
         skippedCount: skipped.length,
+      });
+      // Durable pilot record. Fire-and-forget: a storage problem must never
+      // stand between a physician and their report.
+      void recordCompletedAudit({
+        report: encodeAnswers(final),
+        durationMs,
+        isDemo: Boolean(demoId),
       });
       try {
         window.sessionStorage.removeItem(DRAFT_KEY);
@@ -120,7 +136,7 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
       }
       router.push(`/results?a=${encodeURIComponent(encodeAnswers(final))}`);
     },
-    [router],
+    [router, demoId],
   );
 
   const next = useCallback(() => {

@@ -13,6 +13,11 @@ export interface LeadInput {
   consent: boolean;
   /** Encoded answers, so the brief can be regenerated from the lead alone. */
   report: string;
+  /** Opaque pilot session id, joining this lead to its audit. Never personal. */
+  sessionId: string;
+  /** Sanitised campaign attribution, carried from first touch. */
+  attribution: Record<string, string>;
+  entryMode: string;
 }
 
 export type LeadRole =
@@ -71,6 +76,10 @@ export interface LeadRecord extends LeadInput {
     opportunityLow: number;
     opportunityHigh: number;
     completeness: number;
+    coverage: number;
+    /** The single strongest evidence line behind the leading finding. */
+    strongestEvidence: string | null;
+    modelVersion: string;
   };
   /** Deep link to the internal brief, so the record is actionable on arrival. */
   briefPath: string;

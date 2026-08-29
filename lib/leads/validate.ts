@@ -1,4 +1,6 @@
 import { decodeAnswers } from "../share";
+import { isSessionId, newSessionId } from "../pilot/attribution";
+import { sanitizeAttribution } from "../pilot/validate";
 import { LEAD_ROLES, NEXT_STEPS, type LeadInput } from "./types";
 
 /**
@@ -78,6 +80,11 @@ export function validateLead(body: unknown): ValidationResult {
       nextStep,
       consent: b.consent === true,
       report: decoded ? report : "",
+      // A malformed or absent session id gets a fresh one rather than being
+      // rejected: losing a real lead over a storage detail would be absurd.
+      sessionId: isSessionId(b.sessionId) ? b.sessionId : newSessionId(),
+      attribution: sanitizeAttribution(b.attribution) as Record<string, string>,
+      entryMode: b.entryMode === "demo" ? "demo" : "direct",
     },
   };
 }

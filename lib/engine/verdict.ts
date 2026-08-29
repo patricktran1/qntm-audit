@@ -59,8 +59,29 @@ export function buildVerdict(
   completeness: number,
 ): Verdict {
   const collections = answers.annualCollections;
+
+  // MATERIALITY USES CONFIDENT VALUE ONLY
+  //
+  // A low-confidence estimate must never be the sole reason we decline to call
+  // a practice healthy. Inflating software spend tenfold on an otherwise
+  // excellent practice used to drag it from `healthy` to `watch`, purely
+  // through a finding whose own estimate says it "assumes an inventory finds
+  // overlapping tools, which is common but not universal". That is the exact
+  // shape of a sales bias: a soft observation quietly withdrawing a clean bill
+  // of health. Low-confidence findings still appear in the report; they simply
+  // do not get to overrule the verdict.
+  const confidentHigh = findings
+    .filter(
+      (f) =>
+        f.confidence !== "low" &&
+        f.estimate &&
+        f.estimate.recurrence === "annual" &&
+        f.estimate.kind !== "current_cost",
+    )
+    .reduce((sum, f) => sum + (f.estimate?.high ?? 0), 0);
+
   const share =
-    collections && collections > 0 ? opportunityHigh / collections : null;
+    collections && collections > 0 ? confidentHigh / collections : null;
 
   const actionable = findings.filter(
     (f) => f.bucket === "quick_win" || f.bucket === "strategic_bet",

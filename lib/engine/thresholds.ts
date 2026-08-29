@@ -77,6 +77,24 @@ export const THRESHOLDS: ThresholdRecord[] = [
     usedIn: "The healthy verdict, and the sales brief's disqualifiers.",
   },
   {
+    id: "aggregate-conservatism-ceiling",
+    label: "Aggregate recurring opportunity ceiling",
+    provenance: "product_judgment",
+    value: "15% of annual collections",
+    rationale:
+      "Individual findings are each conservative, but they overlap, and summing them produced totals we would not defend — a small practice was shown a recurring range worth 22% of everything it collects. The aggregate is capped and the capping is disclosed; the individual findings are never altered.",
+    usedIn: "The rolled-up recurring range in the report and the sales brief.",
+  },
+  {
+    id: "verdict-materiality-confidence",
+    label: "Only confident findings affect the verdict",
+    provenance: "product_judgment",
+    value: "Low-confidence estimates excluded from the materiality test",
+    rationale:
+      "A low-confidence observation must never be the sole reason we decline to call a practice healthy. Low-confidence findings still appear in the report; they do not get to overrule a clean bill of health.",
+    usedIn: "The healthy verdict threshold.",
+  },
+  {
     id: "score-coverage-floor",
     label: "Score coverage floor",
     provenance: "product_judgment",

@@ -222,6 +222,11 @@ export interface AuditResult {
   oneTimeHigh: number;
   /** How many distinct findings contribute to the annual range. */
   quantifiedCount: number;
+  /**
+   * True when the summed findings exceeded the conservatism ceiling and the
+   * reported total was capped. Disclosed in the report rather than hidden.
+   */
+  opportunityCapped: boolean;
   automationCandidates: AutomationCandidate[];
   completeness: number;
   /** The one conclusion the audit stands behind. Drives the report and the CTA. */

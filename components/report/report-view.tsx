@@ -17,6 +17,7 @@ import { ScorePanel } from "./score-panel";
 import { ShareActions } from "./share-actions";
 import { VerdictHero } from "./verdict-hero";
 import { reportDimensions, track } from "@/lib/analytics";
+import { flushAssumptionChanges, rememberAssumptionChange } from "@/lib/pilot/client";
 import { currencyExact, metricValue, num } from "@/lib/format";
 import { encodeAnswers } from "@/lib/share";
 import { runAudit } from "@/lib/engine/audit";
@@ -78,18 +79,35 @@ export function ReportView({
   const setAssumption = useCallback(
     (key: keyof Assumptions, value: number) => {
       setAssumptions((prev) => {
-        if (prev[key] !== value)
-          track({
-            name: "assumption_changed",
+        if (prev[key] !== value) {
+          const direction = value > prev[key] ? "up" : "down";
+          track({ name: "assumption_changed", key, value, direction });
+          // Which assumptions physicians push back on is one of the strongest
+          // trust signals we can collect, so it is retained, not only counted.
+          rememberAssumptionChange({
             key,
-            value,
-            direction: value > prev[key] ? "up" : "down",
+            from: DEFAULT_ASSUMPTIONS[key],
+            to: value,
+            direction,
           });
+        }
         return { ...prev, [key]: value };
       });
     },
     [],
   );
+
+  // Send accumulated assumption movements when the reader leaves. Dragging a
+  // slider fires continuously; posting on exit sends the settled values once.
+  useEffect(() => {
+    if (demo) return;
+    const flush = () => void flushAssumptionChanges(reportParam);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [demo, reportParam]);
 
   const shareUrl = useMemo(() => {
     if (typeof window === "undefined") return "";

@@ -4,7 +4,9 @@ import { validateLead } from "@/lib/leads/validate";
 import type { LeadRecord } from "@/lib/leads/types";
 import { clientKey, rateLimit } from "@/lib/rate-limit";
 import { runAudit } from "@/lib/engine/audit";
+import { MODEL_VERSION } from "@/lib/engine/version";
 import { decodeAnswers } from "@/lib/share";
+import { pilotStore } from "@/lib/pilot/store";
 
 /** Five submissions per address per ten minutes. Generous for a human. */
 const LIMIT = 5;
@@ -58,11 +60,26 @@ export async function POST(request: Request) {
       opportunityLow: result?.opportunityLow ?? 0,
       opportunityHigh: result?.opportunityHigh ?? 0,
       completeness: result?.completeness ?? 0,
+      coverage: result?.score.coverage ?? 0,
+      // One line, so a notification carries evidence rather than a headline.
+      strongestEvidence: (() => {
+        const top = result?.topOpportunities[0];
+        const line = top?.evidence.find((e) => e.reported) ?? top?.evidence[0];
+        return line ? `${line.label}: ${line.value}` : null;
+      })(),
+      modelVersion: MODEL_VERSION,
     },
     briefPath: input.report
-      ? `/internal/brief?a=${encodeURIComponent(input.report)}`
+      ? `/internal/brief?a=${encodeURIComponent(input.report)}&s=${input.sessionId}`
       : "",
   };
+
+  // Join the lead to its audit before delivering, so the brief link in the
+  // notification lands on a session that already shows the lead state.
+  const marked = await pilotStore().markSession(record.sessionId, {
+    leadSubmittedAt: record.receivedAt,
+  });
+  if (!marked.ok) console.warn("[lead] pilot mark failed", marked.error);
 
   const delivery = await deliverLead(record);
 

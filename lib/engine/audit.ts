@@ -16,6 +16,14 @@ import type {
   OpenQuestion,
 } from "./types";
 
+/**
+ * The most the audit will claim in aggregate recurring value, as a share of
+ * collections. Our judgement, recorded in lib/engine/thresholds.ts. Chosen so
+ * that overlapping findings cannot compound into a figure no operator would
+ * stand behind on a call.
+ */
+export const MAX_RECURRING_SHARE = 0.15;
+
 /** Run the whole audit. Pure function — same inputs, same report, every time. */
 export function runAudit(
   answers: AuditAnswers,
@@ -41,8 +49,27 @@ export function runAudit(
   );
   const annual = countable.filter((f) => f.estimate!.recurrence === "annual");
   const oneTime = countable.filter((f) => f.estimate!.recurrence === "one_time");
-  const opportunityLow = annual.reduce((s, f) => s + (f.estimate?.low ?? 0), 0);
-  const opportunityHigh = annual.reduce((s, f) => s + (f.estimate?.high ?? 0), 0);
+  const rawLow = annual.reduce((s, f) => s + (f.estimate?.low ?? 0), 0);
+  const rawHigh = annual.reduce((s, f) => s + (f.estimate?.high ?? 0), 0);
+
+  // CONSERVATISM CEILING
+  //
+  // Individual findings are each conservative, but they overlap — several draw
+  // on the same hours and slots — so summing them can produce a total we would
+  // not defend. A small practice was being shown a recurring range worth 22% of
+  // everything it collects, which is phantom precision dressed as arithmetic.
+  //
+  // The total is therefore capped at a share of collections and the cap is
+  // disclosed. Individual findings are never altered: the cap changes what we
+  // claim in aggregate, not what we observed.
+  const ceiling =
+    answers.annualCollections && answers.annualCollections > 0
+      ? answers.annualCollections * MAX_RECURRING_SHARE
+      : Infinity;
+  const opportunityCapped = rawHigh > ceiling;
+  const scale = opportunityCapped ? ceiling / rawHigh : 1;
+  const opportunityLow = rawLow * scale;
+  const opportunityHigh = rawHigh * scale;
   const oneTimeLow = oneTime.reduce((s, f) => s + (f.estimate?.low ?? 0), 0);
   const oneTimeHigh = oneTime.reduce((s, f) => s + (f.estimate?.high ?? 0), 0);
 
@@ -71,12 +98,14 @@ export function runAudit(
       low: opportunityLow,
       high: opportunityHigh,
       count: annual.length,
+      capped: opportunityCapped,
     }),
     opportunityLow,
     opportunityHigh,
     oneTimeLow,
     oneTimeHigh,
     quantifiedCount: annual.length,
+    opportunityCapped,
     // Suppressed for a healthy practice: recommending automation on the same
     // page as "we do not think you need us" is exactly the contradiction that
     // makes diagnostics read as brochures.
@@ -262,7 +291,7 @@ function executiveSummary(
   score: ReturnType<typeof computeScore>,
   top: Finding[],
   verdict: ReturnType<typeof buildVerdict>,
-  opp: { low: number; high: number; count: number },
+  opp: { low: number; high: number; count: number; capped: boolean },
 ): string[] {
   const lines: string[] = [];
 
@@ -338,7 +367,13 @@ function executiveSummary(
         opp.low,
       )} to ${currencyExact(
         opp.high,
-      )} a year. These are directional estimates built from your own inputs and the assumptions listed at the end of this report — not audited figures, and not a promise. They also overlap: several of them draw on the same underlying hours and slots, so the total is an order of magnitude, not a sum you should bank.`,
+      )} a year. These are directional estimates built from your own inputs and the assumptions listed at the end of this report — not audited figures, and not a promise. They also overlap: several of them draw on the same underlying hours and slots, so the total is an order of magnitude, not a sum you should bank.${
+        opp.capped
+          ? ` The individual findings below add up to more than ${Math.round(
+              MAX_RECURRING_SHARE * 100,
+            )}% of your collections, which is more than we are willing to claim in aggregate — the total above is capped at that ceiling, and the individual figures are the ones to read.`
+          : ""
+      }`,
     );
   } else {
     lines.push(

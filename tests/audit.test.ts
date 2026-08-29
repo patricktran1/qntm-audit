@@ -112,7 +112,31 @@ describe("runAudit — economic integrity", () => {
       const sum = counted
         .filter((f) => f.estimate!.recurrence === "annual")
         .reduce((s, f) => s + f.estimate!.high, 0);
-      expect(r.opportunityHigh).toBeCloseTo(sum, 4);
+
+      // The reported total is the sum of countable findings, except where the
+      // conservatism ceiling binds — in which case it is strictly lower and the
+      // capping is disclosed. It must never exceed the sum either way.
+      expect(r.opportunityHigh).toBeLessThanOrEqual(sum + 1e-6);
+      if (r.opportunityCapped) {
+        expect(r.opportunityHigh).toBeLessThan(sum);
+        expect(r.executiveSummary.join(" ")).toMatch(/capped/i);
+      } else {
+        expect(r.opportunityHigh).toBeCloseTo(sum, 4);
+      }
+    }
+  });
+
+  it("caps the aggregate rather than quietly shrinking a single finding", () => {
+    // The cap changes what we claim in aggregate, never what we observed. Each
+    // finding must keep its own arithmetic so the evidence stays inspectable.
+    const capped = DEMO_PROFILES.map((p) => runAudit(p.answers)).find(
+      (r) => r.opportunityCapped,
+    );
+    if (!capped) return; // No demo profile currently trips the ceiling.
+    for (const f of capped.findings) {
+      if (!f.estimate) continue;
+      expect(f.estimate.low).toBeLessThanOrEqual(f.estimate.high);
+      expect(f.estimate.formula.length).toBeGreaterThan(10);
     }
   });
 

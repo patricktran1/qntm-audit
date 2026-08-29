@@ -57,21 +57,31 @@ const SINKS: Sink[] = [
   },
 ];
 
-/** A Slack message a salesperson can act on without opening anything else. */
+/**
+ * A notification a salesperson can act on without opening anything else — and
+ * deliberately not the whole audit. Signal, then a link to the protected brief.
+ */
 function slackText(lead: LeadRecord): string {
   const c = lead.context;
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  const attribution = Object.entries(lead.attribution)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" ");
+
   return [
     `*New practice audit lead* — ${lead.practiceName || "practice not given"}`,
-    `${lead.name || "Name not given"} · ${lead.role} · ${lead.email}`,
+    `${lead.name || "name not given"} · ${lead.role.replace(/_/g, " ")} · ${lead.email}`,
     lead.location || null,
+    attribution ? `Source: ${attribution}` : "Source: none recorded",
     `Verdict *${c.verdict}* · posture ${c.posture} · score ${
       c.score ?? "withheld"
-    } · ${c.physicians ?? "?"} physicians`,
+    } · coverage ${Math.round(c.coverage * 100)}% · ${c.physicians ?? "?"} physicians`,
     c.topFinding ? `Top finding: ${c.topFinding}` : null,
-    `Wants: ${lead.nextStep}`,
-    lead.concern ? `In their words: "${lead.concern.slice(0, 400)}"` : null,
+    c.strongestEvidence ? `Evidence: ${c.strongestEvidence}` : null,
+    `Wants: ${lead.nextStep.replace(/_/g, " ")}`,
+    lead.concern ? `In their words: "${lead.concern.slice(0, 300)}"` : null,
     `Brief: ${base}${lead.briefPath}`,
+    `Session ${lead.sessionId} · model ${c.modelVersion}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -81,15 +91,17 @@ export async function deliverLead(lead: LeadRecord): Promise<DeliveryResult> {
   const active = SINKS.filter((s) => s.configured());
 
   if (active.length === 0) {
-    // No sink configured. Accepting is the honest behaviour for an MVP — the
-    // alternative is telling a physician their request failed when it did not.
-    // Contact details are deliberately excluded from this log line.
+    // No sink configured. Accepting is the honest behaviour — the alternative
+    // is telling a physician their request failed when it did not. Contact
+    // details are deliberately excluded from this log line.
     console.info(
       "[lead] accepted with no sink configured",
       JSON.stringify({
         receivedAt: lead.receivedAt,
+        sessionId: lead.sessionId,
         role: lead.role,
         nextStep: lead.nextStep,
+        attribution: lead.attribution,
         context: lead.context,
       }),
     );
@@ -104,5 +116,22 @@ export async function deliverLead(lead: LeadRecord): Promise<DeliveryResult> {
     if (r.status === "fulfilled") sinks.push(name);
     else failures.push(name);
   });
+
+  // A silently swallowed delivery failure is how a real lead gets lost. Log it
+  // loudly enough to be discoverable, with the session id so the record can be
+  // recovered from the pilot store.
+  if (failures.length > 0) {
+    console.error(
+      "[lead] delivery failed",
+      JSON.stringify({
+        sessionId: lead.sessionId,
+        receivedAt: lead.receivedAt,
+        failedSinks: failures,
+        deliveredSinks: sinks,
+        recoverable: "lead is retained in the pilot store if one is configured",
+      }),
+    );
+  }
+
   return { delivered: sinks.length > 0, sinks, failures };
 }

@@ -8,6 +8,7 @@ import { runAudit } from "@/lib/engine/audit";
 import { decodeAnswers } from "@/lib/share";
 import { num } from "@/lib/format";
 import { LEAD_ROLES, NEXT_STEPS } from "@/lib/leads/types";
+import { leadIdentity } from "@/lib/pilot/client";
 
 /**
  * LEAD CAPTURE
@@ -66,6 +67,7 @@ export function TalkForm({ report }: { report?: string }) {
           nextStep: data.get("nextStep"),
           consent: data.get("consent") === "on",
           report: report ?? "",
+          ...leadIdentity(),
         }),
       });
       const json = (await res.json()) as { ok: boolean; error?: string };

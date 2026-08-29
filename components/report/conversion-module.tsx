@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { track } from "@/lib/analytics";
+import { pilotIdentity } from "@/lib/pilot/attribution";
 import type { AuditResult } from "@/lib/engine/types";
 
 /**
@@ -22,13 +23,23 @@ export function ConversionModule({
   const topCategory = topOpportunities[0]?.category ?? null;
 
   const href = `/talk?a=${encodeURIComponent(reportParam)}`;
-  const onClick = () =>
+  const onClick = () => {
     track({
       name: "cta_clicked",
       location: "report_conversion_module",
       posture: offer.posture,
       topCategory,
     });
+    // Records CTA engagement against the durable session, so the pilot can
+    // separate "read the report and stopped" from "clicked but did not submit".
+    const identity = pilotIdentity();
+    void fetch("/api/pilot/mark", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: identity.sessionId, event: "cta" }),
+      keepalive: true,
+    }).catch(() => {});
+  };
 
   // Nothing to sell. Present it as a conclusion, not as an offer.
   if (offer.posture === "none") {
