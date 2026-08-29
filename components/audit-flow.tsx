@@ -5,7 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { NumberField } from "@/components/number-field";
 import { Wordmark } from "@/components/wordmark";
-import { track } from "@/lib/analytics";
+import {
+  currentVariant,
+  reportDimensions,
+  track,
+  type Variant,
+} from "@/lib/analytics";
 import { encodeAnswers } from "@/lib/share";
 import {
   EMPTY_ANSWERS,
@@ -26,14 +31,17 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
   const [hydrated, setHydrated] = useState(false);
   const startedAt = useRef<number>(Date.now());
   const reported = useRef(false);
+  // Tracks how far the visitor actually got, so an abandon event distinguishes
+  // "left on screen 2" from "went back to screen 2 after reaching screen 8".
+  const furthest = useRef(0);
 
   // Restore a draft, or load a demo profile when one is requested.
   useEffect(() => {
+    const variant: Variant = currentVariant() ?? "A";
     const demo = demoId ? profileById(demoId) : undefined;
     if (demo) {
       setAnswers(demo.answers);
-      track({ name: "demo_profile_loaded", profile: demo.id });
-      track({ name: "audit_started", source: "demo" });
+      track({ name: "audit_started", source: "demo", variant });
       setHydrated(true);
       return;
     }
@@ -51,7 +59,7 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
     } catch {
       // A corrupt draft is not worth surfacing; start clean.
     }
-    track({ name: "audit_started", source: restored ? "resume" : "cta" });
+    track({ name: "audit_started", source: restored ? "resume" : "cta", variant });
     setHydrated(true);
   }, [demoId]);
 
@@ -70,7 +78,13 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
     const onHide = () => {
       if (reported.current) return;
       const step = STEPS[index];
-      if (step) track({ name: "audit_abandoned", step: step.id, index });
+      if (step)
+        track({
+          name: "audit_abandoned",
+          step: step.id,
+          index,
+          furthestIndex: furthest.current,
+        });
     };
     window.addEventListener("pagehide", onHide);
     return () => window.removeEventListener("pagehide", onHide);
@@ -91,16 +105,13 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
       const skipped = (Object.keys(final) as (keyof AuditAnswers)[]).filter(
         (k) => final[k] === null,
       );
-      // Score and leading category are the two analytics that actually inform
-      // the product, so they are computed here rather than left null.
+      // Banded dimensions only — no raw collections, no free text.
       const result = runAudit(final);
       track({
         name: "audit_completed",
         durationMs: Date.now() - startedAt.current,
-        completeness: result.completeness,
-        score: result.score.overall,
+        dimensions: reportDimensions(result),
         skippedCount: skipped.length,
-        topCategory: result.topOpportunities[0]?.category ?? null,
       });
       try {
         window.sessionStorage.removeItem(DRAFT_KEY);
@@ -117,13 +128,19 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
     const skipped = fields
       .filter((f) => answers[f.key] === null)
       .map((f) => f.key as string);
-    skipped.forEach((field) => track({ name: "field_skipped", field }));
-    track({ name: "step_completed", step: step.id, index, skipped });
+    skipped.forEach((field) =>
+      track({ name: "unknown_selected", field, step: step.id }),
+    );
+    track({ name: "screen_completed", step: step.id, index, skipped });
     if (isLast) finish(answers);
     else setIndex((i) => i + 1);
   }, [answers, canAdvance, fields, finish, index, isLast, step.id]);
 
   const back = useCallback(() => setIndex((i) => Math.max(0, i - 1)), []);
+
+  useEffect(() => {
+    furthest.current = Math.max(furthest.current, index);
+  }, [index]);
 
   // Cmd/Ctrl+Enter advances from anywhere on the step.
   useEffect(() => {
@@ -269,7 +286,11 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
                   onClick={() => {
                     setAnswers(p.answers);
                     setIndex(STEPS.length - 1);
-                    track({ name: "demo_profile_loaded", profile: p.id });
+                    track({
+                      name: "audit_started",
+                      source: "demo",
+                      variant: currentVariant() ?? "A",
+                    });
                   }}
                   className="rounded-full border border-rule-strong px-3.5 py-1.5 text-[12.5px] text-ink-muted transition-colors hover:border-accent hover:text-accent"
                 >

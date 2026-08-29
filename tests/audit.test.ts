@@ -293,10 +293,13 @@ describe("buildBrief", () => {
     for (const profile of DEMO_PROFILES) {
       const r = runAudit(profile.answers);
       const b = buildBrief(r);
-      expect(b.highestPain).toBe(r.topOpportunities[0]!.title);
+      expect(b.primaryPain).toBe(r.topOpportunities[0]!.title);
       expect(b.serviceFit.length).toBeGreaterThan(3);
       expect(b.discoveryQuestions.length).toBeGreaterThanOrEqual(5);
       expect(b.recommendedConversation).not.toMatch(/undefined|NaN/);
+      expect(b.openingQuestion).not.toMatch(/undefined|NaN/);
+      expect(b.suggestedNextAction.length).toBeGreaterThan(20);
+      expect(b.invalidators.length).toBeGreaterThan(0);
     }
   });
 

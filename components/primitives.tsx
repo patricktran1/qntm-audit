@@ -78,6 +78,88 @@ export function Card({
   );
 }
 
+/**
+ * Provenance marker. Three states, visually distinct, used everywhere a number
+ * appears: what the practice told us, what we calculated, and what we do not
+ * know. Making these distinguishable at a glance is the difference between a
+ * report a CFO can audit and one they have to trust.
+ */
+export type Provenance = "observed" | "estimated" | "unknown";
+
+const PROVENANCE_COPY: Record<Provenance, { mark: string; label: string; help: string }> = {
+  observed: {
+    mark: "\u25CF",
+    label: "Reported",
+    help: "A figure you entered. Not modified by this audit.",
+  },
+  estimated: {
+    mark: "\u0192",
+    label: "Calculated",
+    help: "Derived by this audit from your answers and the stated assumptions.",
+  },
+  unknown: {
+    mark: "\u2014",
+    label: "Not known",
+    help: "You skipped this, so it is excluded rather than guessed at.",
+  },
+};
+
+export function ProvenanceMark({ kind }: { kind: Provenance }) {
+  const meta = PROVENANCE_COPY[kind];
+  const tone =
+    kind === "observed"
+      ? "text-accent"
+      : kind === "estimated"
+        ? "text-ink-faint"
+        : "text-rule-strong";
+  return (
+    <span
+      className={`ml-1 select-none text-[10px] leading-none ${tone}`}
+      title={`${meta.label} — ${meta.help}`}
+      aria-label={meta.label}
+      role="img"
+    >
+      {meta.mark}
+    </span>
+  );
+}
+
+/** The key that explains the marks. Rendered once per section that uses them. */
+export function ProvenanceKey({ className = "" }: { className?: string }) {
+  return (
+    <p className={`text-[11.5px] leading-relaxed text-ink-faint ${className}`}>
+      <span className="text-accent">{PROVENANCE_COPY.observed.mark}</span>{" "}
+      reported by you
+      <span className="mx-2 text-rule-strong">·</span>
+      <span className="text-ink-faint">{PROVENANCE_COPY.estimated.mark}</span>{" "}
+      calculated by this audit
+      <span className="mx-2 text-rule-strong">·</span>
+      <span className="text-rule-strong">{PROVENANCE_COPY.unknown.mark}</span>{" "}
+      not known, and excluded rather than guessed
+    </p>
+  );
+}
+
+/**
+ * The standing caveat that must appear beside every rolled-up dollar figure.
+ * Written once so it cannot drift between the report and the sales brief.
+ */
+export const ESTIMATE_CAVEAT =
+  "Diagnostic opportunity estimates, not promised savings. These are computed from your inputs and the assumptions in this report, they overlap where findings draw on the same hours or slots, and no part of this audit establishes that acting on them would realise the figure shown.";
+
+export function EstimateCaveat({ className = "" }: { className?: string }) {
+  return (
+    <p
+      className={`border-l-2 border-signal-mid/40 pl-3 text-[12px] leading-relaxed text-ink-muted ${className}`}
+    >
+      <span className="font-semibold text-ink">
+        Diagnostic estimates, not promised savings.
+      </span>{" "}
+      {ESTIMATE_CAVEAT.split("not promised savings. ")[1]}
+    </p>
+  );
+}
+
 export function SectionHeading({
   eyebrow,
   title,

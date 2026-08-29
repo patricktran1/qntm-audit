@@ -3,7 +3,12 @@ import { Wordmark } from "@/components/wordmark";
 import { DEMO_PROFILES } from "@/lib/engine/profiles";
 import { STEPS } from "@/lib/engine/questions";
 import { runAudit } from "@/lib/engine/audit";
-import { LandingTelemetry } from "./landing-telemetry";
+
+import { landingCopy } from "@/lib/experiment";
+import { LandingTelemetry } from "@/components/variant-sync";
+import { VARIANT_COOKIE } from "@/middleware";
+import { cookies } from "next/headers";
+import type { Variant } from "@/lib/analytics";
 
 /**
  * What a real user actually answers: every field, less one of the two mutually
@@ -58,10 +63,15 @@ const HONESTY = [
   },
 ];
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const jar = await cookies();
+  const assigned = jar.get(VARIANT_COOKIE)?.value;
+  const variant: Variant = assigned === "B" ? "B" : "A";
+  const copy = landingCopy(variant, QUESTION_COUNT, STEPS.length);
+
   return (
     <>
-      <LandingTelemetry />
+      <LandingTelemetry variant={variant} />
       <div className="mx-auto max-w-[1140px] px-5 sm:px-8">
         <header className="flex items-center justify-between py-6">
           <Wordmark />
@@ -69,7 +79,7 @@ export default function LandingPage() {
             href="/audit"
             className="text-[13px] font-semibold tracking-wide text-accent no-underline hover:text-accent-ink"
           >
-            Start audit →
+            {copy.ctaLabel} →
           </Link>
         </header>
 
@@ -77,28 +87,22 @@ export default function LandingPage() {
         <section className="border-t border-rule pt-12 sm:pt-16">
           <div className="grid gap-12 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:gap-16">
             <div>
-              <p className="eyebrow">
-                Operational diagnostic · Independent dermatology
-              </p>
+              <p className="eyebrow">{copy.eyebrow}</p>
               <h1 className="display mt-5 text-[2.6rem] leading-[1.05] tracking-tight text-ink sm:text-[3.4rem]">
-                Your practice,
+                {copy.headline[0]}
                 <br />
-                decoded.
+                {copy.headline[1]}
               </h1>
               <p className="mt-6 max-w-xl text-[17px] leading-relaxed text-ink-muted">
-                Answer {QUESTION_COUNT} questions about how your practice
-                actually runs. Get a specific, arithmetic-backed read on where
-                physician time, staff capacity, and collected revenue are
-                leaking — and which two or three things are worth measuring
-                before you change anything.
+                {copy.subhead}
               </p>
 
               <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-4">
                 <Link
                   href="/audit"
-                  className="inline-flex items-center justify-center rounded-md bg-accent px-7 py-3.5 text-[15px] font-semibold text-white no-underline transition-colors hover:bg-accent-ink"
+                  className="inline-flex min-h-12 items-center justify-center rounded-md bg-accent px-7 py-3.5 text-[15px] font-semibold text-white no-underline transition-colors hover:bg-accent-ink"
                 >
-                  Start audit
+                  {copy.ctaLabel}
                 </Link>
                 <div className="text-[13px] leading-snug text-ink-faint">
                   About five minutes.
@@ -108,12 +112,7 @@ export default function LandingPage() {
               </div>
 
               <dl className="mt-12 grid grid-cols-2 gap-x-8 gap-y-6 border-t border-rule pt-8 sm:grid-cols-4">
-                {[
-                  [String(QUESTION_COUNT), "questions"],
-                  [String(STEPS.length), "short screens"],
-                  ["~5", "minutes"],
-                  ["0", "industry benchmarks used"],
-                ].map(([value, label]) => (
+                {copy.stats.map(([value, label]) => (
                   <div key={label}>
                     <dt className="tnum display text-2xl text-ink">
                       {value}
@@ -129,7 +128,7 @@ export default function LandingPage() {
             {/* Sample of the actual output, not a stock illustration. */}
             <div className="lg:pt-6">
               <div className="rounded-lg border border-rule bg-paper-raised p-6 sm:p-7">
-                <p className="eyebrow">Excerpt · Sample report</p>
+                <p className="eyebrow">{copy.sampleEyebrow}</p>
                 <p className="display mt-3 text-[19px] leading-snug text-ink">
                   {SAMPLE_FINDING.title}
                 </p>
@@ -279,8 +278,17 @@ export default function LandingPage() {
             Or read a finished report before you answer anything
           </h2>
           <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-ink-muted">
-            Three synthetic practices, each with a different problem. Entirely
-            fabricated — no real practice data appears anywhere in this product.
+            Three synthetic practices, each reaching a different conclusion —
+            including one where the audit decides there is nothing worth buying.
+            Entirely fabricated; no real practice data appears anywhere in this
+            product.{" "}
+            <Link
+              href="/demo"
+              className="font-semibold text-accent no-underline hover:text-accent-ink"
+            >
+              Open the finished reports
+            </Link>
+            .
           </p>
           <div className="mt-8 grid gap-4 lg:grid-cols-3">
             {DEMO_PROFILES.map((p) => (
@@ -311,7 +319,7 @@ export default function LandingPage() {
           <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-16">
             <div>
               <h2 className="display text-[1.9rem] leading-tight text-ink">
-                Find out what your practice is actually spending its capacity on
+                {copy.closingHeadline}
               </h2>
               <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-ink-muted">
                 {QUESTION_COUNT} questions across {STEPS.length} screens, about
@@ -321,9 +329,9 @@ export default function LandingPage() {
             </div>
             <Link
               href="/audit"
-              className="inline-flex shrink-0 items-center justify-center rounded-md bg-accent px-8 py-3.5 text-[15px] font-semibold text-white no-underline transition-colors hover:bg-accent-ink"
+              className="inline-flex min-h-12 shrink-0 items-center justify-center rounded-md bg-accent px-8 py-3.5 text-[15px] font-semibold text-white no-underline transition-colors hover:bg-accent-ink"
             >
-              Start audit
+              {copy.ctaLabel}
             </Link>
           </div>
         </section>

@@ -187,7 +187,7 @@ const phoneCapacity: Detector = ({ a, k, d }) => {
     confidence: unanswered !== null ? "medium" : "low",
     automation: "phone_triage",
     nextStep:
-      "Before changing anything, tag call reasons for five consecutive clinic days — scheduling, results, refills, billing, clinical question, other. Practices routinely find that 50–70% of volume falls into two categories, and that changes what you should build.",
+      "Before changing anything, tag call reasons for five consecutive clinic days — scheduling, results, refills, billing, clinical question, other. We expect two categories to dominate, but we are guessing until you count — and what you find changes what is worth building.",
   };
 };
 
@@ -230,7 +230,7 @@ const noShowLeakage: Detector = ({ a, k, d }) => {
     confidence: "medium",
     automation: "reminders_recalls",
     nextStep:
-      "Split your no-show number by visit type and by lead time. In most practices the rate is concentrated in appointments booked more than three weeks out — which tells you whether to fix reminders or fix the schedule.",
+      "Split your no-show number by visit type and by lead time. Our working hypothesis is that the rate concentrates in appointments booked furthest out; your own split is what settles whether to fix reminders or fix the schedule.",
   };
 };
 
@@ -277,7 +277,7 @@ const physicianAdminLoad: Detector = ({ a, k, d }) => {
       ),
     ],
     interpretation:
-      "We are not claiming this is cash you could bank tomorrow. Half of this time typically cannot be converted to clinic even if it were freed. What the number does establish is the exchange rate: every hour of documentation, inbox, refill, or form work is being purchased at the contribution value of a clinical hour, and that is the price to weigh any fix against.",
+      "We are not claiming this is cash you could bank tomorrow. We assume only a quarter to a half of it could be converted to clinic even if it were freed, and the range below reflects that. What the number does establish is the exchange rate: every hour of documentation, inbox, refill, or form work is being purchased at the contribution value of a clinical hour, and that is the price to weigh any fix against.",
     estimate: {
       // Deliberately conservative: only a third to a half of freed physician
       // time realistically converts to clinical or genuinely reclaimed time.
@@ -607,7 +607,7 @@ const softwareStack: Detector = ({ a, d }) => {
     estimate: {
       low: d.softwareCost !== null ? d.softwareCost * 0.08 : 0,
       high: d.softwareCost !== null ? d.softwareCost * 0.18 : 0,
-      formula: "annual software spend × 8–18% typically recoverable from overlap and unused seats",
+      formula: "annual software spend × 8–18%, our assumed range for what an inventory tends to surface in overlap and unused seats",
       assumptions: [
         "Assumes an inventory finds overlapping or under-used tools, which is common but not universal",
         "Excludes any switching cost or migration effort",
@@ -684,7 +684,7 @@ const visitYield: Detector = ({ a, d }) => {
       derivedLine("Estimated annual visits", num(d.annualVisits)),
     ],
     interpretation:
-      "There are only three levers here and they are worth naming separately: what a visit collects (coding accuracy, visit-type mix, ancillary and pathology capture), how many visits the same team can support (schedule density and access), and what the team costs. Most practices reach for the third because it is the most visible, when the first is usually the largest and the least disruptive.",
+      "There are only three levers here and they are worth naming separately: what a visit collects (coding accuracy, visit-type mix, ancillary and pathology capture), how many visits the same team can support (schedule density and access), and what the team costs. The third is the most visible and so the most often reached for. We would look at the first before the third, because coding and visit-mix changes are usually less disruptive — but that is our prior, not a measurement of your practice.",
     estimate: null,
     impact: ratio > 0.5 ? "high" : "medium",
     effort: "medium",

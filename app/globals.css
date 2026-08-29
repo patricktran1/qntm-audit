@@ -132,6 +132,18 @@ input[type="number"] {
     display: block !important;
   }
 
+  /* Collapsed disclosure panels must print. A PDF that hides the evidence
+     defeats the point of publishing the arithmetic. */
+  .print-force-open,
+  [hidden].print-force-open {
+    display: revert !important;
+  }
+  /* The finding detail panel is a grid; revert would make it block. */
+  .print-force-open.grid,
+  [hidden].print-force-open.grid {
+    display: grid !important;
+  }
+
   /* Cards become ruled blocks; borders survive printing, shadows do not. */
   .print-block {
     border: 1px solid #d8d4cd !important;

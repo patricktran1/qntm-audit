@@ -3,13 +3,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Wordmark } from "@/components/wordmark";
-import { ConfidenceChip, SectionHeading } from "@/components/primitives";
+import {
+  ConfidenceChip,
+  EstimateCaveat,
+  ProvenanceKey,
+  ProvenanceMark,
+  SectionHeading,
+} from "@/components/primitives";
 import { AssumptionsPanel } from "./assumptions-panel";
+import { ConversionModule } from "./conversion-module";
 import { FindingCard } from "./finding-card";
 import { ScorePanel } from "./score-panel";
-import { track } from "@/lib/analytics";
+import { ShareActions } from "./share-actions";
+import { VerdictHero } from "./verdict-hero";
+import { reportDimensions, track } from "@/lib/analytics";
 import { currencyExact, metricValue, num } from "@/lib/format";
-import { textSummary } from "@/lib/summary";
 import { encodeAnswers } from "@/lib/share";
 import { runAudit } from "@/lib/engine/audit";
 import { DEFAULT_ASSUMPTIONS } from "@/lib/engine/assumptions";
@@ -28,16 +36,36 @@ const BUCKET_ORDER: Bucket[] = [
   "low_priority",
 ];
 
-export function ReportView({ answers }: { answers: AuditAnswers }) {
+/**
+ * Report information hierarchy, in reading order:
+ *   1 verdict + the two figures worth remembering
+ *   2 what matters most (findings, progressively disclosed)
+ *   3 economic consequence
+ *   4 where the time goes / what could be automated
+ *   5 what to do next (plan) and the conversation offer
+ *   6 assumptions, editable
+ *   7 methodology — score curves and formulas, present but not in the way
+ */
+export function ReportView({
+  answers,
+  demo = false,
+}: {
+  answers: AuditAnswers;
+  demo?: boolean;
+}) {
   const [assumptions, setAssumptions] = useState<Assumptions>(DEFAULT_ASSUMPTIONS);
   const result = useMemo(() => runAudit(answers, assumptions), [answers, assumptions]);
   const reported = useRef(false);
+  const reportParam = useMemo(() => encodeAnswers(answers), [answers]);
 
   useEffect(() => {
     if (reported.current) return;
     reported.current = true;
-    track({ name: "results_viewed", score: result.score.overall });
-  }, [result.score.overall]);
+    track({ name: "report_viewed", dimensions: reportDimensions(result), demo });
+    // Dimensions are derived from the same answers on every render; reporting
+    // once on mount is the intent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const dirty = useMemo(
     () =>
@@ -47,17 +75,26 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
     [assumptions],
   );
 
-  const setAssumption = useCallback((key: keyof Assumptions, value: number) => {
-    setAssumptions((prev) => ({ ...prev, [key]: value }));
-    track({ name: "assumption_changed", key, value });
-  }, []);
+  const setAssumption = useCallback(
+    (key: keyof Assumptions, value: number) => {
+      setAssumptions((prev) => {
+        if (prev[key] !== value)
+          track({
+            name: "assumption_changed",
+            key,
+            value,
+            direction: value > prev[key] ? "up" : "down",
+          });
+        return { ...prev, [key]: value };
+      });
+    },
+    [],
+  );
 
   const shareUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
-    return `${window.location.origin}/results?a=${encodeURIComponent(
-      encodeAnswers(answers),
-    )}`;
-  }, [answers]);
+    return `${window.location.origin}/results?a=${encodeURIComponent(reportParam)}`;
+  }, [reportParam]);
 
   const grouped = useMemo(() => {
     const map = new Map<Bucket, Finding[]>();
@@ -68,159 +105,114 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
     );
   }, [result.findings]);
 
-  const timeLeaks = useMemo(
-    () =>
-      [
-        {
-          label: "Physician administrative time",
-          hours: result.metrics.find((m) => m.key === "physicianAdminOpportunityCost")
-            ? (answers.physicianAdminHoursPerWeek ?? 0) *
+  const timeLeaks = useMemo(() => {
+    const callHours = result.metrics.find((m) => m.key === "callHoursPerDay")?.value;
+    return [
+      {
+        label: "Physician administrative time",
+        hours:
+          answers.physicianAdminHoursPerWeek !== null && answers.physicians !== null
+            ? answers.physicianAdminHoursPerWeek *
               assumptions.clinicalWeeksPerYear *
-              (answers.physicians ?? 0)
+              answers.physicians
             : null,
-          value: result.metrics.find(
-            (m) => m.key === "physicianAdminOpportunityCost",
-          )?.value,
-          note: "Charting, inbox, refills, and forms, priced at the contribution value of a clinical hour.",
-        },
-        {
-          label: "Front-office time on phones",
-          hours:
-            answers.callsPerDay !== null && answers.clinicalDaysPerWeek !== null
-              ? (result.metrics.find((m) => m.key === "callHoursPerDay")?.value ?? 0) *
-                answers.clinicalDaysPerWeek *
-                assumptions.clinicalWeeksPerYear
-              : null,
-          value: null,
-          note: "Handled calls only. Time spent on calls that were never answered does not appear here.",
-        },
-        {
-          label: "Clinical staff time on prior authorization",
-          hours:
-            answers.priorAuthStaffHoursPerWeek !== null
-              ? answers.priorAuthStaffHoursPerWeek * assumptions.clinicalWeeksPerYear
-              : null,
-          value: result.metrics.find((m) => m.key === "priorAuthLaborCost")?.value,
-          note: "Payer paperwork, at loaded clinical staff cost.",
-        },
-      ].filter((t) => t.hours !== null && t.hours > 0),
-    [answers, assumptions, result.metrics],
-  );
+        value: result.metrics.find((m) => m.key === "physicianAdminOpportunityCost")
+          ?.value,
+        note: "Charting, inbox, refills, and forms, priced at the contribution value of a clinical hour.",
+      },
+      {
+        label: "Front-office time on phones",
+        hours:
+          callHours != null && answers.clinicalDaysPerWeek !== null
+            ? callHours * answers.clinicalDaysPerWeek * assumptions.clinicalWeeksPerYear
+            : null,
+        value: null,
+        note: "Handled calls only. Time lost to calls that were never answered does not appear here.",
+      },
+      {
+        label: "Clinical staff time on prior authorization",
+        hours:
+          answers.priorAuthStaffHoursPerWeek !== null
+            ? answers.priorAuthStaffHoursPerWeek * assumptions.clinicalWeeksPerYear
+            : null,
+        value: result.metrics.find((m) => m.key === "priorAuthLaborCost")?.value,
+        note: "Payer paperwork, at loaded clinical staff cost.",
+      },
+    ].filter((t) => t.hours !== null && t.hours > 0);
+  }, [answers, assumptions, result.metrics]);
 
   return (
     <div className="min-h-screen">
-      <ReportHeader
-        result={result}
-        shareUrl={shareUrl}
-        encodedAnswers={encodeAnswers(answers)}
-      />
+      <header className="sticky top-0 z-10 border-b border-rule bg-paper/95 backdrop-blur">
+        <div className="mx-auto flex max-w-[1000px] items-center justify-between gap-x-4 px-5 py-3 sm:px-8 sm:py-3.5">
+          <Wordmark subdued />
+          <ShareActions result={result} shareUrl={shareUrl} />
+        </div>
+        {demo ? (
+          <p className="no-print bg-accent-soft px-5 py-1.5 text-center text-[11.5px] tracking-wide text-accent-ink sm:px-8">
+            Sample report · synthetic practice, not real patient or practice data
+          </p>
+        ) : null}
+      </header>
 
       <main className="mx-auto max-w-[1000px] px-5 pb-24 sm:px-8">
-        {/* ── Executive summary ─────────────────────────────────────── */}
-        <section className="pt-10 sm:pt-14">
-          <p className="eyebrow">Executive summary</p>
-          <div className="mt-5 space-y-4 border-l-2 border-accent pl-5 sm:pl-7">
-            {result.executiveSummary.map((line, i) => (
-              <p
-                key={line.slice(0, 40)}
-                className={
-                  i === 0
-                    ? "display text-[1.35rem] leading-snug text-ink sm:text-[1.5rem]"
-                    : "max-w-3xl text-[15px] leading-relaxed text-ink-muted"
-                }
-              >
-                {line}
-              </p>
-            ))}
-          </div>
+        {/* ── 1 · Verdict ───────────────────────────────────────────── */}
+        <div className="pt-10 sm:pt-14">
+          <VerdictHero result={result} />
+        </div>
 
-          {result.completeness < 1 ? (
-            <p className="mt-6 rounded-md border border-rule bg-paper-sunk px-4 py-3 text-[13px] leading-relaxed text-ink-muted">
-              You answered {Math.round(result.completeness * 100)}% of the
-              questions. Skipped inputs did not block the audit — they lowered
-              the confidence on findings that needed them, and became questions
-              at the end of this report.
-            </p>
-          ) : null}
-        </section>
+        {result.completeness < 1 ? (
+          <p className="mt-6 rounded-md border border-rule bg-paper-sunk px-4 py-3 text-[13px] leading-relaxed text-ink-muted">
+            You answered {Math.round(result.completeness * 100)}% of the
+            questions. Skipped inputs did not block the audit — they lowered the
+            confidence of findings that needed them, were excluded from the
+            score rather than counted as zero, and became questions further
+            down.
+          </p>
+        ) : null}
 
-        {/* ── Score ─────────────────────────────────────────────────── */}
-        <section className="mt-14">
-          <SectionHeading eyebrow="Score" title="Where the capacity is going">
-            Six dimensions, weighted. Each one is scored against a published
-            curve rather than against other practices — we do not hold a
-            benchmark data set, and we would rather say so than invent one.
-          </SectionHeading>
-          <ScorePanel score={result.score} />
-        </section>
-
-        {/* ── Top opportunities ─────────────────────────────────────── */}
+        {/* ── 2 · What matters most ─────────────────────────────────── */}
         {result.topOpportunities.length > 0 ? (
-          <section className="mt-16 print-break-before">
+          <section className="mt-16">
             <SectionHeading
-              eyebrow={`Top ${result.topOpportunities.length} opportunities`}
-              title="What is worth looking at first"
+              eyebrow={
+                result.verdict.level === "healthy"
+                  ? "Observations"
+                  : `Top ${result.topOpportunities.length} findings`
+              }
+              title={
+                result.verdict.level === "healthy"
+                  ? "What we noticed, for completeness"
+                  : "What is worth looking at first"
+              }
             >
-              Ordered by how loud the signal is, not by how easy the fix is.
-              Sequencing comes next.
+              {result.verdict.level === "healthy"
+                ? "None of these clears the bar for action. They are here so you can see what the audit examined, and so a change in six months is visible against them."
+                : "Ordered by how loud the signal is, not by how easy the fix is. Sequencing comes after."}
             </SectionHeading>
 
             {result.opportunityHigh > 0 ? (
-              <div className="print-block mb-8 rounded-lg border border-rule bg-paper-sunk p-6">
-                <div className="flex flex-wrap items-baseline gap-x-8 gap-y-4">
-                  <div>
-                    <p className="eyebrow">Identified recurring range</p>
-                    <p className="tnum display mt-1.5 text-[1.75rem] text-ink">
-                      {currencyExact(result.opportunityLow)}
-                      <span className="text-ink-faint"> – </span>
-                      {currencyExact(result.opportunityHigh)}
-                      <span className="text-[15px] text-ink-faint">
-                        {" "}
-                        / year
-                      </span>
-                    </p>
-                  </div>
-                  {result.oneTimeHigh > 0 ? (
-                    <div>
-                      <p className="eyebrow">One-time cash release</p>
-                      <p className="tnum display mt-1.5 text-[1.75rem] text-ink-muted">
-                        {currencyExact(result.oneTimeLow)}
-                        <span className="text-ink-faint"> – </span>
-                        {currencyExact(result.oneTimeHigh)}
-                      </p>
-                    </div>
-                  ) : null}
-                </div>
-                <p className="mt-4 max-w-3xl border-t border-rule pt-4 text-[13px] leading-relaxed text-ink-muted">
-                  Across {result.quantifiedCount} quantified finding
-                  {result.quantifiedCount === 1 ? "" : "s"}. These ranges
-                  overlap — several of them draw on the same underlying hours
-                  and slots — so treat the total as an order of magnitude rather
-                  than a sum. One-time cash is working capital released by
-                  faster collection, not new revenue, which is why it is
-                  reported separately.
-                </p>
-              </div>
+              <EstimateCaveat className="mb-7" />
             ) : null}
 
             <div className="space-y-8">
               {result.topOpportunities.map((f, i) => (
-                <FindingCard key={f.id} finding={f} index={i} />
+                <FindingCard key={f.id} finding={f} index={i} defaultOpen={i === 0} />
               ))}
             </div>
           </section>
         ) : (
           <section className="mt-16">
-            <SectionHeading eyebrow="Opportunities" title="Nothing stood out">
-              On the dimensions we measured, none of the detectors fired. That is
-              a real result rather than a failure of the tool — the questions
-              further down are where the remaining uncertainty sits.
+            <SectionHeading eyebrow="Findings" title="Nothing stood out">
+              On the dimensions we could measure, none of the detectors fired.
+              That is a real result rather than a failure of the tool — the
+              questions further down are where the remaining uncertainty sits.
             </SectionHeading>
           </section>
         )}
 
-        {/* ── Prioritization matrix ─────────────────────────────────── */}
-        {result.findings.length > 0 ? (
+        {/* ── 3 · Prioritization ────────────────────────────────────── */}
+        {result.findings.length > 1 ? (
           <section className="mt-16 print-break-before">
             <SectionHeading
               eyebrow="Prioritization"
@@ -230,7 +222,6 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
               data behind it. A high-impact finding we are not confident in
               becomes something to measure, never something to buy.
             </SectionHeading>
-
             <div className="space-y-6">
               {grouped.map(({ bucket, findings }) => (
                 <div
@@ -284,14 +275,14 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
           </section>
         ) : null}
 
-        {/* ── Economic snapshot ─────────────────────────────────────── */}
+        {/* ── 4 · Economic snapshot ─────────────────────────────────── */}
         {result.metrics.length > 0 ? (
-          <section className="mt-16 print-break-before">
+          <section className="mt-16">
             <SectionHeading
               eyebrow="Economic snapshot"
               title="Your practice, in the numbers it implies"
             >
-              Everything below is calculated from what you entered. Nothing is
+              Everything below is computed from what you entered. Nothing is
               compared against an outside data set.
             </SectionHeading>
             <div className="print-block rounded-lg border border-rule bg-paper-raised">
@@ -303,6 +294,7 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
                   >
                     <dt className="min-w-0 flex-1 text-[14px] text-ink">
                       {m.label}
+                      <ProvenanceMark kind="estimated" />
                       {m.note ? (
                         <span className="mt-0.5 block max-w-2xl text-[12px] leading-relaxed text-ink-faint">
                           {m.note}
@@ -315,16 +307,19 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
                   </div>
                 ))}
               </dl>
+              <div className="border-t border-rule px-6 py-3 sm:px-8">
+                <ProvenanceKey />
+              </div>
             </div>
           </section>
         ) : null}
 
-        {/* ── Time leaks ────────────────────────────────────────────── */}
+        {/* ── 5 · Time leaks ────────────────────────────────────────── */}
         {timeLeaks.length > 0 ? (
           <section className="mt-16">
             <SectionHeading eyebrow="Time leaks" title="Where the hours are going">
               Annualised from what you reported. Hours are the currency that
-              matters most here — dollars are downstream of them.
+              matters here — dollars are downstream of them.
             </SectionHeading>
             <div className="grid gap-4 sm:grid-cols-3">
               {timeLeaks.map((t) => (
@@ -353,7 +348,7 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
           </section>
         ) : null}
 
-        {/* ── Automation candidates ─────────────────────────────────── */}
+        {/* ── 6 · Automation ────────────────────────────────────────── */}
         {result.automationCandidates.length > 0 ? (
           <section className="mt-16">
             <SectionHeading
@@ -371,9 +366,7 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
                   className="print-block print-avoid-break rounded-lg border border-rule bg-paper-raised p-6"
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-                    <h3 className="text-[16px] font-semibold text-ink">
-                      {c.label}
-                    </h3>
+                    <h3 className="text-[16px] font-semibold text-ink">{c.label}</h3>
                     <ConfidenceChip level={c.confidence} />
                   </div>
                   <p className="mt-2.5 text-[14px] leading-relaxed text-ink">
@@ -402,13 +395,13 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
           </section>
         ) : null}
 
-        {/* ── Open questions ────────────────────────────────────────── */}
+        {/* ── 7 · Open questions ────────────────────────────────────── */}
         <section className="mt-16 print-break-before">
           <SectionHeading
             eyebrow="Open questions"
             title="What this audit cannot tell you"
           >
-            Thirteen questions cannot describe a practice. These are the gaps
+            Seventeen questions cannot describe a practice. These are the gaps
             that most affect the reliability of everything above.
           </SectionHeading>
           <ol className="print-block divide-y divide-rule rounded-lg border border-rule bg-paper-raised">
@@ -425,7 +418,7 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
           </ol>
         </section>
 
-        {/* ── 30-day plan ───────────────────────────────────────────── */}
+        {/* ── 8 · Plan ──────────────────────────────────────────────── */}
         <section className="mt-16">
           <SectionHeading eyebrow="Next 30 days" title="Measure before you spend">
             Nothing on this list requires buying anything — including from us.
@@ -438,12 +431,8 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
                 className="print-block print-avoid-break grid gap-x-6 gap-y-2 rounded-lg border border-rule bg-paper-raised p-5 sm:grid-cols-[110px_minmax(0,1fr)]"
               >
                 <div>
-                  <p className="text-[13px] font-semibold text-accent">
-                    {item.week}
-                  </p>
-                  <p className="mt-0.5 text-[12px] text-ink-faint">
-                    {item.owner}
-                  </p>
+                  <p className="text-[13px] font-semibold text-accent">{item.week}</p>
+                  <p className="mt-0.5 text-[12px] text-ink-faint">{item.owner}</p>
                 </div>
                 <div>
                   <p className="text-[14.5px] leading-relaxed text-ink">
@@ -458,51 +447,43 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
           </ol>
         </section>
 
-        {/* ── Assumptions ───────────────────────────────────────────── */}
+        {/* ── 9 · Conversion ────────────────────────────────────────── */}
+        <ConversionModule result={result} reportParam={reportParam} />
+
+        {/* ── 10 · Assumptions ──────────────────────────────────────── */}
         <section className="mt-16 print-break-before">
           <SectionHeading
             eyebrow="Assumptions"
-            title="Every number in this report, and where it came from"
+            title="Change any of these and the whole report moves"
           >
-            If you disagree with a figure above, change the assumption behind it
-            and watch the report move. That is the point of this section.
+            If you disagree with a figure above, the assumption behind it is
+            here. That is the point of this section — a model you cannot argue
+            with is not worth reading.
           </SectionHeading>
           <AssumptionsPanel
             assumptions={assumptions}
             metrics={result.metrics}
+            score={result.score}
             onChange={setAssumption}
-            onReset={() => setAssumptions(DEFAULT_ASSUMPTIONS)}
+            onReset={() => {
+              setAssumptions(DEFAULT_ASSUMPTIONS);
+              track({ name: "assumptions_reset" });
+            }}
             dirty={dirty}
           />
         </section>
 
-        {/* ── CTA ───────────────────────────────────────────────────── */}
-        <section className="no-print mt-16">
-          <div className="rounded-lg border border-rule-strong bg-paper-raised p-7 sm:p-9">
-            <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-12">
-              <div>
-                <p className="eyebrow">Want a second set of eyes?</p>
-                <h2 className="display mt-3 text-[1.5rem] leading-snug text-ink">
-                  We can go through this with you and build the implementation
-                  plan
-                </h2>
-                <p className="mt-3 max-w-2xl text-[14.5px] leading-relaxed text-ink-muted">
-                  QNTM is an operating and automation partner for independent
-                  physician practices. If the findings above match what you see
-                  day to day, a 30-minute review is usually enough to work out
-                  whether the first fix is worth doing at all — and we will tell
-                  you when it is not.
-                </p>
-              </div>
-              <Link
-                href={`/talk?a=${encodeURIComponent(encodeAnswers(answers))}`}
-                onClick={() => track({ name: "cta_clicked", location: "results_footer" })}
-                className="inline-flex shrink-0 items-center justify-center rounded-md bg-accent px-7 py-3.5 text-[15px] font-semibold text-white no-underline transition-colors hover:bg-accent-ink"
-              >
-                Request a review
-              </Link>
-            </div>
-          </div>
+        {/* ── 11 · Score detail (methodology-adjacent) ──────────────── */}
+        <section className="mt-16">
+          <SectionHeading
+            eyebrow="Score detail"
+            title="How the six dimensions were scored"
+          >
+            Each dimension is scored against a published curve rather than
+            against other practices. We hold no benchmark data set, and would
+            rather say so than invent one.
+          </SectionHeading>
+          <ScorePanel score={result.score} />
         </section>
 
         <footer className="mt-16 border-t border-rule pt-8">
@@ -521,87 +502,9 @@ export function ReportView({ answers }: { answers: AuditAnswers }) {
             >
               Run another audit
             </Link>
-            <Link
-              href={`/brief?a=${encodeURIComponent(encodeAnswers(answers))}`}
-              className="text-[13px] font-medium text-ink-faint no-underline hover:text-ink"
-            >
-              Internal opportunity brief
-            </Link>
           </div>
         </footer>
       </main>
     </div>
-  );
-}
-
-function ReportHeader({
-  result,
-  shareUrl,
-  encodedAnswers,
-}: {
-  result: ReturnType<typeof runAudit>;
-  shareUrl: string;
-  encodedAnswers: string;
-}) {
-  const [copied, setCopied] = useState<"summary" | "link" | null>(null);
-
-  const copy = useCallback(
-    async (kind: "summary" | "link") => {
-      const text = kind === "link" ? shareUrl : textSummary(result, shareUrl);
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch {
-        // Clipboard blocked (insecure context, permissions). Fall back to a
-        // selection prompt rather than failing silently.
-        window.prompt("Copy this:", text);
-      }
-      setCopied(kind);
-      window.setTimeout(() => setCopied(null), 2200);
-      track(
-        kind === "link"
-          ? { name: "report_shared" }
-          : { name: "report_downloaded", format: "clipboard" },
-      );
-    },
-    [result, shareUrl],
-  );
-
-  return (
-    <header className="sticky top-0 z-10 border-b border-rule bg-paper/95 backdrop-blur">
-      <div className="mx-auto flex max-w-[1000px] items-center justify-between gap-x-4 px-5 py-3 sm:px-8 sm:py-3.5">
-        <Wordmark subdued />
-        <div className="no-print flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => copy("summary")}
-            className="rounded-md border border-rule-strong px-3 py-2 text-[13px] font-medium text-ink-muted transition-colors hover:border-ink-faint hover:text-ink sm:px-3.5"
-          >
-            {copied === "summary" ? "Copied" : "Copy"}
-            <span className="hidden sm:inline">&nbsp;summary</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => copy("link")}
-            className="rounded-md border border-rule-strong px-3 py-2 text-[13px] font-medium text-ink-muted transition-colors hover:border-ink-faint hover:text-ink sm:px-3.5"
-          >
-            {copied === "link" ? "Copied" : "Share"}
-            <span className="hidden sm:inline">&nbsp;link</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              track({ name: "report_downloaded", format: "pdf" });
-              window.print();
-            }}
-            className="rounded-md bg-ink px-3 py-2 text-[13px] font-semibold text-paper transition-colors hover:bg-accent-ink sm:px-3.5"
-          >
-            <span className="hidden sm:inline">Download&nbsp;</span>PDF
-          </button>
-        </div>
-      </div>
-      <div className="print-only mx-auto max-w-[1000px] px-5 pb-3 text-[10px] text-ink-faint">
-        QNTM Practice Audit · report id {encodedAnswers.slice(0, 24)}…
-      </div>
-    </header>
   );
 }

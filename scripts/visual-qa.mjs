@@ -17,7 +17,11 @@ const REPORTS = {
   group: "3_2_5400000_4.5_26_11_13_i_~_3_9_340_14_19_7_34_58_11500",
   growth: "2_3_5200000_4.5_36_6_9_h_4.5_1_7_260_11_26_15_28_36_7400",
   sparse: "1_0_900000_4_24_2_2_i_~_~_~_~_~_~_~_~_~_~",
+  // A genuinely well-run practice — the report should decline to sell.
+  healthy: "1_1_1900000_4_30_2_3_o_4_~_3_110_4_8_4_3_26_2400",
 };
+
+const INTERNAL_KEY = process.env.INTERNAL_ACCESS_TOKEN ?? "test-token-abc123";
 
 const DESKTOP = { viewport: { width: 1440, height: 1000 } };
 const MOBILE = {
@@ -57,8 +61,10 @@ async function shoot(name, path, ctxOpts, opts = {}) {
   await ctx.close();
 }
 
-await shoot("01-landing-desktop", "/", DESKTOP);
-await shoot("02-landing-mobile", "/", MOBILE);
+await shoot("01-landing-A-desktop", "/?v=A", DESKTOP);
+await shoot("01b-landing-B-desktop", "/?v=B", DESKTOP);
+await shoot("02-landing-A-mobile", "/?v=A", MOBILE);
+await shoot("02b-landing-B-mobile", "/?v=B", MOBILE);
 await shoot("03-audit-step1-desktop", "/audit", DESKTOP);
 await shoot("04-audit-step1-mobile", "/audit", MOBILE);
 await shoot("05-audit-billing-desktop", "/audit?demo=group-overhead", DESKTOP, {
@@ -80,11 +86,32 @@ await shoot(`10-report-sparse-desktop`, `/results?a=${REPORTS.sparse}`, DESKTOP)
 await shoot(`11-report-print`, `/results?a=${REPORTS.growth}`, DESKTOP, {
   media: { media: "print" },
 });
-await shoot(`12-brief-desktop`, `/brief?a=${REPORTS.group}`, DESKTOP);
-await shoot(`13-brief-mobile`, `/brief?a=${REPORTS.group}`, MOBILE);
-await shoot(`14-talk-desktop`, `/talk?a=${REPORTS.solo}`, DESKTOP);
-await shoot(`15-talk-mobile`, `/talk?a=${REPORTS.solo}`, MOBILE);
+await shoot(`12-brief-desktop`, `/internal/brief?a=${REPORTS.group}&key=${INTERNAL_KEY}`, DESKTOP);
+await shoot(`13-brief-mobile`, `/internal/brief?a=${REPORTS.group}&key=${INTERNAL_KEY}`, MOBILE);
+await shoot(`14-talk-desktop`, `/talk?a=${REPORTS.group}`, DESKTOP);
+await shoot(`15-talk-mobile`, `/talk?a=${REPORTS.group}`, MOBILE);
 await shoot(`16-results-badlink`, `/results?a=broken`, DESKTOP);
+await shoot(`17-report-healthy-desktop`, `/results?a=${REPORTS.healthy}`, DESKTOP);
+await shoot(`18-report-healthy-mobile`, `/results?a=${REPORTS.healthy}`, MOBILE);
+await shoot(`19-demo-desktop`, `/demo`, DESKTOP);
+await shoot(`20-demo-mobile`, `/demo`, MOBILE);
+await shoot(`21-report-expanded-desktop`, `/results?a=${REPORTS.group}`, DESKTOP, {
+  before: async (page) => {
+    // Open every disclosure so the expanded state is inspected too. Each
+    // click flips the button label, so re-query rather than caching a list.
+    for (let i = 0; i < 12; i++) {
+      const next = page.getByRole("button", { name: /Show the evidence/ }).first();
+      if ((await next.count()) === 0) break;
+      await next.click();
+      await page.waitForTimeout(60);
+    }
+    for (const name of [/How every figure/, /Every threshold/]) {
+      const btn = page.getByRole("button", { name }).first();
+      if (await btn.count()) await btn.click();
+    }
+    await page.waitForTimeout(300);
+  },
+});
 
 await browser.close();
 

@@ -12,9 +12,9 @@ export const metadata = {
 export default async function ResultsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ a?: string }>;
+  searchParams: Promise<{ a?: string; demo?: string }>;
 }) {
-  const { a } = await searchParams;
+  const { a, demo } = await searchParams;
   const answers = decodeAnswers(a);
 
   if (!answers) {
@@ -41,7 +41,7 @@ export default async function ResultsPage({
 
   return (
     <Suspense fallback={null}>
-      <ReportView answers={answers} />
+      <ReportView answers={answers} demo={demo === "1"} />
     </Suspense>
   );
 }

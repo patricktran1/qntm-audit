@@ -22,8 +22,30 @@ describe("share encoding", () => {
     expect(decodeAnswers(encodeAnswers(a))).toEqual(a);
   });
 
-  it("round-trips an empty audit", () => {
-    expect(decodeAnswers(encodeAnswers(EMPTY_ANSWERS))).toEqual(EMPTY_ANSWERS);
+  it("refuses a link that carries no answers at all", () => {
+    // Contract change, deliberate: an all-unknown payload is not a report. It
+    // previously round-tripped, which meant a mangled or truncated URL could
+    // render a confident audit of a practice with zero physicians and zero
+    // collections. The results page now shows the broken-link state instead.
+    expect(decodeAnswers(encodeAnswers(EMPTY_ANSWERS))).toBeNull();
+    expect(decodeAnswers("_".repeat(17))).toBeNull();
+  });
+
+  it("keeps a partially answered audit, and treats blanks as unknown", () => {
+    const partial: AuditAnswers = { ...EMPTY_ANSWERS, physicians: 2, noShowRate: 0 };
+    const back = decodeAnswers(encodeAnswers(partial))!;
+    expect(back).toEqual(partial);
+    expect(back.annualCollections).toBeNull();
+    // The zero must survive as a zero, not become unknown.
+    expect(back.noShowRate).toBe(0);
+  });
+
+  it("never decodes a blank segment to zero", () => {
+    const parts = encodeAnswers(DEMO_PROFILES[0]!.answers).split("_");
+    parts[2] = ""; // collections wiped by a truncated copy-paste
+    const back = decodeAnswers(parts.join("_"))!;
+    expect(back.annualCollections).toBeNull();
+    expect(back.physicians).toBe(1);
   });
 
   it("preserves the difference between zero and unknown", () => {

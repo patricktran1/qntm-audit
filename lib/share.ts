@@ -61,13 +61,20 @@ export function decodeAnswers(encoded: string | null | undefined): AuditAnswers 
   const parts = encoded.split(SEPARATOR);
   if (parts.length !== ORDER.length) return null;
   const out: AuditAnswers = { ...EMPTY_ANSWERS };
+  let decoded = 0;
   for (let i = 0; i < ORDER.length; i++) {
     const key = ORDER[i]!;
     const raw = parts[i];
-    if (raw === undefined || raw === "~") continue;
+    // An empty segment means "not answered", never zero. A mangled or
+    // truncated link used to decode to a practice with zero physicians and
+    // zero collections, which rendered a confident report about nothing.
+    if (raw === undefined || raw === "" || raw === "~") continue;
     if (key === "billingModel") {
       const model = BILLING_FROM_CODE[raw];
-      if (model) out.billingModel = model;
+      if (model) {
+        out.billingModel = model;
+        decoded += 1;
+      }
       continue;
     }
     const parsed = Number(raw);
@@ -76,6 +83,9 @@ export function decodeAnswers(encoded: string | null | undefined): AuditAnswers 
     // from a hand-edited URL.
     if (parsed < 0 || parsed > 1_000_000_000) continue;
     (out[key] as number | null) = parsed;
+    decoded += 1;
   }
-  return out;
+  // A payload of the right shape carrying no usable values is not a report.
+  // Returning it would render an audit of an empty practice.
+  return decoded === 0 ? null : out;
 }
