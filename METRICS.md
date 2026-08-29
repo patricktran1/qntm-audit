@@ -82,7 +82,7 @@ These are hypotheses to falsify, not goals to hit.
 | --- | --- |
 | Completion rate | ≥ 55% |
 | Median time to complete | ≤ 5 min |
-| Median fields skipped | ≤ 3 of 16 |
+| Median fields skipped | ≤ 3 of 17 |
 | Reports where an assumption was changed | ≥ 15% |
 | Report downloaded or shared | ≥ 30% |
 | Consultation requested | ≥ 8% of completed reports |

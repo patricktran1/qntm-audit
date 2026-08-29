@@ -1,7 +1,7 @@
 # QNTM Practice Audit
 
 A five-minute operational diagnostic for independent dermatology practices. A
-physician answers ~16 questions about how their practice runs and gets a
+physician answers 17 questions about how their practice runs and gets a
 transparent, arithmetic-backed read on where physician time, staff capacity, and
 collected revenue are leaking — with every formula and assumption printed next
 to the number it produced.

@@ -5,7 +5,7 @@ that it makes cutting easy later.
 
 ## In scope
 
-- A guided audit of roughly sixteen high-signal operating questions
+- A guided audit of seventeen high-signal operating questions across nine screens
 - A deterministic calculation engine with published formulas and curves
 - A physician-facing report: score, ranked opportunities, economics, time leaks,
   automation candidates, open questions, a 30-day plan, editable assumptions
@@ -54,7 +54,7 @@ objection — which is the objection this category most deserves.
 service. A dedicated print stylesheet produces a text-selectable, correctly
 paginated document on every platform, and it looks better than a canvas render.
 
-**Seventeen fields rather than ten to fifteen.** A considered overrun. Every
+**Seventeen questions rather than ten to fifteen.** A considered overrun. Every
 field has a named consumer — a scored dimension or a detector — and dropping any
 of them would silently degrade a finding rather than simplify the product. The
 binding constraint is the five-minute promise, which nine short screens meet; an

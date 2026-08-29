@@ -2,7 +2,7 @@
 
 ## The promise
 
-> Answer about sixteen questions. Find out where your practice is losing time
+> Answer seventeen short questions. Find out where your practice is losing time
 > and money, why we think so, and what to measure before you spend anything.
 
 ## Who it is for

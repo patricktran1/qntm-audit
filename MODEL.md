@@ -28,7 +28,7 @@ working target, not an industry benchmark.
 
 ## Inputs
 
-Sixteen values across nine screens (seventeen fields, of which a practice sees
+Seventeen questions across nine screens (eighteen fields, of which a practice sees
 either the billing-vendor fee or the in-house billing FTE, never both). Every
 optional field accepts "I don't know", which propagates as `null` rather than
 zero — the distinction is enforced by tests.
