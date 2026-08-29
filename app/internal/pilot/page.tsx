@@ -428,7 +428,7 @@ export default async function PilotPage() {
                     // Sixty rows prefetching sixty briefs is pure waste on an
                     // operator table nobody scrolls looking for links.
                     prefetch={false}
-                    className="text-[13px] font-semibold text-accent no-underline"
+                    className="inline-flex min-h-11 items-center justify-end text-[13px] font-semibold text-accent no-underline"
                   >
                     Brief
                   </Link>

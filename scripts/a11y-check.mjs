@@ -21,7 +21,9 @@ const problems = [];
 async function audit(name, path, opts = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await ctx.newPage();
-  await page.goto(BASE + path, { waitUntil: "networkidle" });
+  await page.goto(BASE + path, {
+    waitUntil: path.startsWith("/internal") ? "domcontentloaded" : "networkidle",
+  });
 
   const found = await page.evaluate(() => {
     const issues = [];
@@ -120,6 +122,10 @@ await audit("audit", "/audit", { keyboard: true });
 await audit("report", `/results?a=${REPORT}`);
 await audit("talk", `/talk?a=${REPORT}`);
 await audit("demo", "/demo");
+// Each audit uses a fresh context, so every internal page carries the key.
+const KEY = process.env.INTERNAL_ACCESS_TOKEN ?? "test-token-abc123";
+await audit("pilot", `/internal/pilot?key=${KEY}`);
+await audit("calibration", `/internal/calibration?key=${KEY}`);
 
 await browser.close();
 

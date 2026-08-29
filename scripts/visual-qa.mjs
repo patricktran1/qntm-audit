@@ -46,7 +46,10 @@ async function shoot(name, path, ctxOpts, opts = {}) {
     if (m.type() === "error") problems.push(`[${name}] console: ${m.text()}`);
   });
   page.on("pageerror", (e) => problems.push(`[${name}] pageerror: ${e.message}`));
-  await page.goto(BASE + path, { waitUntil: "networkidle" });
+  await page.goto(BASE + path, {
+    waitUntil: path.startsWith("/internal") ? "domcontentloaded" : "networkidle",
+  });
+  if (path.startsWith("/internal")) await page.waitForTimeout(500);
   if (opts.before) await opts.before(page);
   if (opts.media) await page.emulateMedia(opts.media);
 
@@ -87,6 +90,9 @@ await shoot(`11-report-print`, `/results?a=${REPORTS.growth}`, DESKTOP, {
   media: { media: "print" },
 });
 await shoot(`12-brief-desktop`, `/internal/brief?a=${REPORTS.group}&key=${INTERNAL_KEY}`, DESKTOP);
+await shoot(`22-pilot-desktop`, `/internal/pilot?key=${INTERNAL_KEY}`, DESKTOP);
+await shoot(`23-pilot-mobile`, `/internal/pilot?key=${INTERNAL_KEY}`, MOBILE);
+await shoot(`24-calibration-desktop`, `/internal/calibration?key=${INTERNAL_KEY}`, DESKTOP);
 await shoot(`13-brief-mobile`, `/internal/brief?a=${REPORTS.group}&key=${INTERNAL_KEY}`, MOBILE);
 await shoot(`14-talk-desktop`, `/talk?a=${REPORTS.group}`, DESKTOP);
 await shoot(`15-talk-mobile`, `/talk?a=${REPORTS.group}`, MOBILE);
