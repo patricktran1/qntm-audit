@@ -349,7 +349,7 @@ const priorAuthLoad: Detector = ({ a, k, d }) => {
   };
 };
 
-const arAging: Detector = ({ a, d }) => {
+const arAging: Detector = ({ a }) => {
   if (a.daysInAR === null || a.daysInAR <= 40) return null;
   if (a.annualCollections === null) return null;
 
