@@ -220,12 +220,47 @@ Bands: 80+ tight operation · 65–79 solid with named gaps · 50–64 meaningfu
 · below 50 substantial leverage available. Bands are computed from the *rounded*
 score so a displayed 65 never carries the band belonging to 64.6.
 
+## Verdict
+
+`lib/engine/verdict.ts` reduces the whole audit to one of four conclusions, and
+the report, the CTA, and the sales brief all read it rather than re-deriving it.
+
+```
+insufficient_data   score withheld, or completeness < 50%
+healthy             score >= 78 AND no confident high-impact finding
+                    AND recurring opportunity < 2% of collections
+act                 at least one high-impact finding we are not low-confidence in
+watch               everything else
+```
+
+`healthy` suppresses the automation candidates entirely, reframes the dollar
+total as noise rather than opportunity, and returns a conversion offer with
+posture `none` — a conclusion rather than a CTA. This is the single most
+important behaviour in the product: an audit that cannot decline to sell is not
+a diagnostic.
+
+The verdict names the finding the report leads with, drawn from the
+significance-ordered list rather than the bucket-ordered one, so the conclusion
+and the first thing the reader sees are the same finding.
+
 ## Findings
 
 Thirteen detectors in `lib/engine/findings.ts`. Each returns `null` when it has
 nothing honest to say. Each produces evidence quoting the user's own numbers, an
 interpretation, a ranged estimate with its formula and assumptions, impact,
 effort, confidence, and a next step requiring no purchase.
+
+Two detector thresholds were corrected after red-teaming the product as five
+buyer archetypes:
+
+- **Physician admin load** requires ≥15% of the physician work week *and* ≥5
+  hours. It previously fired at 3 hours and became the headline finding for
+  four of five archetypes, including a practice at 11% — which is a good
+  result, not an opportunity. A finding that fires for everyone is noise.
+- **Billing cost** scales with the spread above a 5% reference rate, capped at
+  four points, of which 30–60% is treated as recoverable. It was previously a
+  flat 0.5–1.5 points of collections, so a practice at 5.6% and one at 12% were
+  told the same thing.
 
 **Impact is scaled to the practice**, not to raw dollars: high at ≥3% of
 collections, medium at ≥1%. A scale-blind threshold would tell every small
@@ -258,6 +293,16 @@ Buckets:
 
 Low confidence never routes to a project bucket regardless of impact. That single
 rule is what separates a diagnostic from a pitch.
+
+## Threshold provenance
+
+`lib/engine/thresholds.ts` records every judgement threshold in the product
+with its class — `arithmetic`, `product_judgment`, `user_input`, or
+`benchmark` — its value, its rationale, and where it is applied. The report
+surfaces the whole registry. Nothing is currently `benchmark`, and the empty
+`BENCHMARKS` array plus its data contract are documented in `BENCHMARKS.md`.
+
+If a threshold is not in that registry, it should not exist in the code.
 
 ## What rolls up into the headline range
 

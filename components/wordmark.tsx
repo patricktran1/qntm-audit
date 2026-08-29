@@ -4,7 +4,7 @@ export function Wordmark({ subdued = false }: { subdued?: boolean }) {
   return (
     <Link
       href="/"
-      className="group inline-flex items-baseline gap-2.5 no-underline"
+      className="group inline-flex min-h-11 shrink-0 items-center gap-2.5 whitespace-nowrap py-1 no-underline"
       aria-label="QNTM Practice Audit — home"
     >
       <span

@@ -23,11 +23,31 @@ a corporate finance function, and anyone looking for a valuation. If the first
 question is about EBITDA multiples, this is the wrong tool and the landing page
 says so.
 
+## The verdict
+
+The audit reaches one of four conclusions, and everything downstream — the
+report's framing, the CTA, the sales brief — is derived from it:
+
+| Verdict | When | What the physician is told | CTA |
+| --- | --- | --- | --- |
+| `healthy` | Score ≥ 78, no confident high-impact finding, opportunity < 2% of collections | "We would not recommend buying a major intervention on the strength of this audit." | None asked for |
+| `act` | At least one confident, high-impact finding | The finding, named, leading the report | Contextual review |
+| `watch` | Findings exist but none clears the bar | "Worth a second opinion, probably not worth a project." | Soft |
+| `insufficient_data` | Score withheld, or under half the questions answered | No verdict; the gaps are the finding | Help measuring |
+
+The `healthy` case is the one that matters. An audit that can never conclude
+"nothing here is worth buying" is a lead-generation quiz, and a dermatologist
+can tell the difference within one screen. It is computed in the engine rather
+than in the UI so the report, the CTA, and the internal brief cannot disagree
+about it.
+
 ## What the physician receives
 
-1. **Executive summary** — three to five sentences, in their own numbers.
-2. **Practice Leverage Score** — 0–100 across six weighted dimensions, each with
-   its scoring curve one click away. Withheld entirely when too little of the
+1. **The verdict** — the conclusion, first, above the fold, with its basis.
+2. **Two figures worth remembering** — the Practice Leverage Score and the
+   contribution value of one provider hour.
+3. **Practice Leverage Score** — 0–100 across six weighted dimensions, each with
+   its scoring curve one click away. Withheld entirely when under half the
    model could be computed.
 3. **Top 3–4 opportunities** — ordered by how loud the signal is, each with
    evidence, an interpretation, a dollar range, a formula, its assumptions, and
@@ -41,15 +61,27 @@ says so.
 8. **Questions this audit cannot answer** — the gaps that most affect the
    reliability of everything above.
 9. **Next 30 days** — a measurement plan requiring no purchase.
-10. **Assumptions** — live sliders that recompute the entire report.
+10. **Assumptions** — live sliders that recompute the entire report, showing
+    the score move as they change.
+11. **Methodology** — every formula, and every threshold with its provenance
+    (arithmetic / our judgement / your input / benchmark-derived). Present, one
+    click away, never in the way.
 
 ## The flow
 
 ```
-Landing  ──►  Audit (9 screens)  ──►  Report  ──►  optional: request a review
-   │                                     │
-   └──► load a synthetic demo practice ──┘
+Landing  ──►  Audit (9 screens)  ──►  Report  ──►  contextual CTA  ──►  Lead
+   │            "I don't know" is          │        (or no CTA, when              │
+   │            a first-class answer       │         the verdict is healthy)      │
+   │                                       │                                      ▼
+   └──► /demo — finished sample reports ───┘                        Internal brief
 ```
+
+The CTA is generated from the verdict and the leading finding's category, so a
+front-office finding offers an access and phone review, a revenue-operations
+finding offers a collections and A/R review, and a healthy practice is offered
+nothing at all. It says "review these findings with us", never "claim your
+savings" — the audit observed a pattern, it did not prove a cause.
 
 Lead capture sits *after* the complete report and is optional. The report link
 works forever with no account. This is the core trust bet of the product: a
@@ -78,9 +110,15 @@ No-show slots are half-refillable by default. One-time cash releases are totalle
 separately from recurring value. The report should survive a CFO reading it
 adversarially.
 
-**Restraint sells better than enthusiasm.** One CTA at the end. No QNTM logo on
-every finding. The internal brief has a section listing reasons *not* to pursue
-the lead.
+**Restraint sells better than enthusiasm.** One CTA at the end, contextual to
+the findings, and absent entirely when the audit concludes there is nothing to
+sell. No QNTM logo on every finding. The internal brief has a section listing
+reasons *not* to pursue the lead, and a "do not pitch" list.
+
+**Nothing is asked twice.** The lead form states back what the audit already
+knows — physician count, score, leading finding — rather than re-collecting it.
+A physician who answers seventeen questions and is then asked how many
+physicians they have has just learned the diagnostic was a form all along.
 
 ## The commercial purpose
 

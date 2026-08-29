@@ -498,7 +498,7 @@ export function ReportView({
             <Wordmark subdued />
             <Link
               href="/audit"
-              className="text-[13px] font-medium text-ink-muted no-underline hover:text-ink"
+              className="inline-flex min-h-11 items-center text-[13px] font-medium text-ink-muted no-underline hover:text-ink"
             >
               Run another audit
             </Link>

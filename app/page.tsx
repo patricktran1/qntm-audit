@@ -75,9 +75,11 @@ export default async function LandingPage() {
       <div className="mx-auto max-w-[1140px] px-5 sm:px-8">
         <header className="flex items-center justify-between py-6">
           <Wordmark />
+          {/* The hero CTA sits immediately below on a phone; repeating it in
+              the header only costs a line of wrapped text. */}
           <Link
             href="/audit"
-            className="text-[13px] font-semibold tracking-wide text-accent no-underline hover:text-accent-ink"
+            className="hidden whitespace-nowrap text-[13px] font-semibold tracking-wide text-accent no-underline hover:text-accent-ink sm:inline"
           >
             {copy.ctaLabel} →
           </Link>

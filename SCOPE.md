@@ -13,7 +13,12 @@ that it makes cutting easy later.
 - An internal opportunity brief for sales enablement
 - Three synthetic demo practices
 - Thin analytics behind a swappable sink
-- Optional lead capture, only after the complete report
+- Optional lead capture, only after the complete report, with a server-side
+  delivery abstraction that degrades to accept-and-log
+- A contextual conversion module derived from the audit's verdict
+- A landing-page experiment with persisted assignment
+- A gated internal area: pre-call sales brief and a session-events view
+- A threshold provenance registry and an empty, documented benchmark contract
 
 ## Out of scope
 
@@ -31,6 +36,9 @@ Cut on sight if any of these start appearing:
 - Autonomous financial advice, valuation, or anything a physician could
   reasonably mistake for an audited financial statement
 - User accounts, saved history, multi-user workspaces, or a report archive
+- Real authentication for the internal area (a shared secret is the current,
+  documented trade — see SECURITY.md)
+- A distributed rate limiter, an analytics dashboard, or session replay
 
 ## Decisions worth recording
 
@@ -49,6 +57,16 @@ distinct from assumptions.
 **No language model.** The report is a pure function. Determinism is testable,
 auditable, free, instant, and immune to the "this is just ChatGPT with a form"
 objection — which is the objection this category most deserves.
+
+**The verdict lives in the engine, not the UI.** Whether a practice should be
+sold to is a conclusion about the data, so it is computed once and consumed by
+the report, the CTA, and the sales brief. Putting it in a component would let
+the three disagree, and the first physician to notice would be right to stop
+reading.
+
+**Bands, not values, in analytics.** Enforced by the event union type. The
+alternative — emitting raw collections and promising not to misuse it — is a
+policy, and policies are not enforced by anything.
 
 **PDF via the browser's print engine.** No PDF library, no headless render
 service. A dedicated print stylesheet produces a text-selectable, correctly
@@ -71,10 +89,12 @@ Not scope creep — just not first:
 - Server-side report persistence and email delivery
 - A/B testing of the question set
 - Multi-language support
-- Any authenticated surface, including for the internal brief, which is currently
-  protected only by being unlinked and `noindex`
-
-That last one is a real limitation and is named as such: anyone holding a report
-link can construct the brief URL. It contains nothing the physician's own report
-does not already support, which is why shipping it this way is acceptable for an
-MVP — but it is the first thing to put behind auth if the tool goes wide.
+- Real identity behind `/internal`. It is now gated by a shared secret with a
+  timing-safe comparison, a 404 rather than a 401, and a fail-closed default in
+  production — but everyone with the token has the same access and there is no
+  audit trail. That is a good trade for a handful of people and a bad one at
+  thirty. SSO in front of `/internal` is the upgrade, and it is a project.
+- A globally consistent rate limiter. The current one is per warm instance,
+  which stops casual abuse and not a distributed attacker.
+- Any benchmark data. The layer is built and the contract documented; the array
+  is deliberately empty until real distributions exist.

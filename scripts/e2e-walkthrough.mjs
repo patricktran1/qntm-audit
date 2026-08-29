@@ -44,9 +44,26 @@ page.on("console", (m) => {
 });
 page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`));
 
+// Both experiment arms must lead into the same funnel. Assert the variant the
+// server rendered matches the arm we asked for, then enter through its CTA.
+const arm = process.env.E2E_VARIANT === "B" ? "B" : "A";
 const started = Date.now();
-await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-await page.getByRole("link", { name: "Start audit", exact: true }).first().click();
+await page.goto(`${BASE}/?v=${arm}`, { waitUntil: "networkidle" });
+
+const heroText = await page.locator("h1").first().innerText();
+// The hero renders across two lines, so normalise whitespace before matching.
+const expectedHero = arm === "B" ? /hour\s+of your time worth/i : /Your practice/i;
+if (!expectedHero.test(heroText.replace(/\s+/g, " ")))
+  problems.push(`variant ${arm} rendered the wrong hero: ${heroText}`);
+
+const cookieVariant = (await ctx.cookies()).find((c) => c.name === "qntm_v")?.value;
+if (cookieVariant !== arm)
+  problems.push(`variant cookie was ${cookieVariant}, expected ${arm}`);
+
+await page
+  .getByRole("link", { name: /^(Start audit|Calculate my hourly value)$/ })
+  .first()
+  .click();
 await page.waitForURL("**/audit");
 // Wait for hydration before typing: an uncontrolled pre-hydration input would
 // have its value reset the moment React attaches.
@@ -84,12 +101,14 @@ while (!page.url().includes("/results")) {
 const elapsed = Date.now() - started;
 await page.waitForSelector("text=Practice Leverage Score");
 
-const score = await page.locator(".display.tnum").first().innerText();
+const reportParam = new URL(page.url()).searchParams.get("a") ?? "";
+const score = await page.locator(".tnum.display").first().innerText();
 const headings = await page.locator("h2, h3").allInnerTexts();
 const body = await page.locator("body").innerText();
 
 if (/NaN|undefined|Infinity/.test(body)) problems.push("report contains NaN/undefined");
-if (!/Top \d opportunit/i.test(body)) problems.push("no opportunities section rendered");
+if (!/Top \d findings|What we noticed/i.test(body))
+  problems.push("no findings section rendered");
 if (!/Next 30 days|Measure before you spend/i.test(body))
   problems.push("no 30-day plan rendered");
 if (!/Assumptions/i.test(body)) problems.push("no assumptions section rendered");
@@ -110,6 +129,52 @@ await slider.evaluate((el) => {
 await page.waitForTimeout(300);
 const after = await page.locator("body").innerText();
 if (before === after) problems.push("changing an assumption did not change the report");
+
+// ── The funnel past the report ───────────────────────────────────────────────
+// A verdict must be published, and it must drive the offer.
+const verdictText = await page.locator("p.eyebrow").first().innerText();
+if (!/verdict/i.test(verdictText)) problems.push("no verdict shown on the report");
+
+// Progressive disclosure must actually disclose.
+const disclose = page.getByRole("button", { name: /Show the evidence/ }).first();
+if ((await disclose.count()) === 0) problems.push("no finding disclosure control");
+else {
+  await disclose.click();
+  await page.waitForTimeout(200);
+  const detail = await page.locator("text=The numbers behind it").first().isVisible();
+  if (!detail) problems.push("finding detail did not open");
+}
+
+// Share controls must exist and must not require an account.
+for (const label of [/^Copy/, /^Share/, /PDF$/]) {
+  if ((await page.getByRole("button", { name: label }).count()) === 0)
+    problems.push(`missing share control ${label}`);
+}
+
+// Follow the contextual CTA into lead capture and submit it.
+const cta = page.getByRole("link", { name: /Review these findings|Pressure-test|Talk through/ }).first();
+if ((await cta.count()) === 0) {
+  problems.push("no conversion CTA on an actionable report");
+} else {
+  await cta.click();
+  await page.waitForURL("**/talk**");
+  await page.waitForLoadState("networkidle");
+
+  const prefilled = await page.locator("text=Attached to this request").count();
+  if (prefilled === 0) problems.push("lead form does not state what the audit already knows");
+
+  await page.locator("#email").fill("e2e@example.com");
+  await page.locator("#name").fill("Dr E2E");
+  await page.locator("#practiceName").fill("E2E Dermatology");
+  await page.getByRole("button", { name: /^Send$/ }).click();
+  await page.waitForSelector("text=That came through", { timeout: 10_000 });
+}
+
+// The report link must still work, and must carry no contact details.
+await page.goto(`${BASE}/results?a=${reportParam}`, { waitUntil: "networkidle" });
+const shared = await page.locator("body").innerText();
+if (/e2e@example\.com|Dr E2E/.test(shared))
+  problems.push("shared report leaked lead contact details");
 
 await browser.close();
 

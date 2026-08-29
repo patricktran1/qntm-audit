@@ -283,7 +283,7 @@ export function TalkForm({ report }: { report?: string }) {
           </button>
           <Link
             href={backHref}
-            className="text-[14px] font-medium text-ink-muted no-underline hover:text-ink"
+            className="inline-flex min-h-11 items-center text-[14px] font-medium text-ink-muted no-underline hover:text-ink"
           >
             Back to my report
           </Link>

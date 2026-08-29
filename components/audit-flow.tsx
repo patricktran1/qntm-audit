@@ -182,7 +182,7 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
 
       <main className="mx-auto w-full max-w-[820px] flex-1 px-5 py-10 sm:px-8 sm:py-14">
         {/* Step rail — orientation without a giant form. */}
-        <ol className="mb-10 flex flex-wrap gap-x-4 gap-y-2">
+        <ol className="mb-10 hidden flex-wrap gap-x-4 gap-y-2 sm:flex">
           {STEPS.map((s, i) => (
             <li key={s.id}>
               <button
@@ -237,38 +237,46 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
           </div>
         </div>
 
-        <div className="mt-12 flex items-center justify-between gap-4 border-t border-rule pt-6">
-          {index > 0 ? (
-            <button
-              type="button"
-              onClick={back}
-              className="text-[14px] font-medium text-ink-muted transition-colors hover:text-ink"
-            >
-              ← Back
-            </button>
-          ) : (
-            <Link
-              href="/"
-              className="text-[14px] font-medium text-ink-muted no-underline transition-colors hover:text-ink"
-            >
-              ← Leave audit
-            </Link>
-          )}
+        <div className="mt-12 border-t border-rule pt-6">
+          {!canAdvance ? (
+            <p className="mb-4 text-[12.5px] text-ink-faint sm:hidden">
+              This one is needed to compute the rest
+            </p>
+          ) : null}
 
-          <div className="flex items-center gap-5">
-            {!canAdvance ? (
-              <span className="text-[12.5px] text-ink-faint">
-                This one is needed to compute the rest
-              </span>
-            ) : null}
-            <button
-              type="button"
-              onClick={next}
-              disabled={!canAdvance}
-              className="inline-flex items-center justify-center rounded-md bg-accent px-6 py-3 text-[15px] font-semibold text-white transition-colors hover:bg-accent-ink disabled:cursor-not-allowed disabled:bg-rule-strong disabled:text-paper-raised"
-            >
-              {isLast ? "See results" : "Continue"}
-            </button>
+          <div className="flex flex-col-reverse items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
+            {index > 0 ? (
+              <button
+                type="button"
+                onClick={back}
+                className="min-h-11 whitespace-nowrap text-[14px] font-medium text-ink-muted transition-colors hover:text-ink sm:text-left"
+              >
+                ← Back
+              </button>
+            ) : (
+              <Link
+                href="/"
+                className="inline-flex min-h-11 items-center justify-center whitespace-nowrap text-[14px] font-medium text-ink-muted no-underline transition-colors hover:text-ink sm:justify-start"
+              >
+                ← Leave audit
+              </Link>
+            )}
+
+            <div className="flex items-center gap-5 sm:justify-end">
+              {!canAdvance ? (
+                <span className="hidden text-[12.5px] text-ink-faint sm:inline">
+                  This one is needed to compute the rest
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={next}
+                disabled={!canAdvance}
+                className="inline-flex min-h-12 w-full items-center justify-center rounded-md bg-accent px-6 py-3 text-[15px] font-semibold text-white transition-colors hover:bg-accent-ink disabled:cursor-not-allowed disabled:bg-rule-strong disabled:text-paper-raised sm:w-auto"
+              >
+                {isLast ? "See results" : "Continue"}
+              </button>
+            </div>
           </div>
         </div>
 
