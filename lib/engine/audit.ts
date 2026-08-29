@@ -6,6 +6,7 @@ import { runDetectors } from "./findings";
 import { prioritize, significance } from "./prioritize";
 import { completeness } from "./questions";
 import { computeScore } from "./score";
+import { buildOffer, buildVerdict } from "./verdict";
 import type {
   ActionItem,
   Assumptions,
@@ -45,16 +46,28 @@ export function runAudit(
   const oneTimeLow = oneTime.reduce((s, f) => s + (f.estimate?.low ?? 0), 0);
   const oneTimeHigh = oneTime.reduce((s, f) => s + (f.estimate?.high ?? 0), 0);
 
+  const verdict = buildVerdict(
+    answers,
+    score,
+    findings,
+    topOpportunities,
+    opportunityHigh,
+    completeness(answers),
+  );
+  const offer = buildOffer(verdict, topOpportunities[0]);
+
   return {
     answers,
     assumptions,
     metrics,
     score,
+    verdict,
+    offer,
     findings,
     topOpportunities,
     openQuestions: openQuestions(answers, findings),
     plan: thirtyDayPlan(topOpportunities, answers),
-    executiveSummary: executiveSummary(answers, d, score, topOpportunities, {
+    executiveSummary: executiveSummary(answers, d, score, topOpportunities, verdict, {
       low: opportunityLow,
       high: opportunityHigh,
       count: annual.length,
@@ -64,7 +77,10 @@ export function runAudit(
     oneTimeLow,
     oneTimeHigh,
     quantifiedCount: annual.length,
-    automationCandidates: automation,
+    // Suppressed for a healthy practice: recommending automation on the same
+    // page as "we do not think you need us" is exactly the contradiction that
+    // makes diagnostics read as brochures.
+    automationCandidates: verdict.level === "healthy" ? [] : automation,
     completeness: completeness(answers),
   };
 }
@@ -245,6 +261,7 @@ function executiveSummary(
   d: ReturnType<typeof derive>,
   score: ReturnType<typeof computeScore>,
   top: Finding[],
+  verdict: ReturnType<typeof buildVerdict>,
   opp: { low: number; high: number; count: number },
 ): string[] {
   const lines: string[] = [];
@@ -280,6 +297,8 @@ function executiveSummary(
     );
   }
 
+  lines.push(`${verdict.headline} ${verdict.detail}`);
+
   if (score.overall !== null) {
     lines.push(
       `Practice Leverage Score: ${score.overall} of 100 — ${score.band.toLowerCase()}. ${score.bandDescription}${
@@ -294,16 +313,26 @@ function executiveSummary(
     );
   }
 
-  if (top[0]) {
+  if (top[0] && verdict.level !== "healthy") {
     const second = top[1];
     lines.push(
       `The clearest signal is ${top[0].title.toLowerCase()}. ${top[0].headline}${
         second ? ` Behind it: ${second.title.toLowerCase()}.` : ""
       }`,
     );
+  } else if (top[0]) {
+    lines.push(
+      `The largest of the small observations is ${top[0].title.toLowerCase()}, and it is worth reading for context rather than acting on: ${top[0].headline}`,
+    );
   }
 
-  if (opp.high > 0) {
+  if (opp.high > 0 && verdict.level === "healthy") {
+    lines.push(
+      `The quantified findings come to ${currencyExact(opp.low)}–${currencyExact(
+        opp.high,
+      )} a year in total. We are showing that figure for completeness, not as a case for doing something: at this practice's scale it is inside the noise, and chasing it would likely cost more attention than it returns.`,
+    );
+  } else if (opp.high > 0) {
     lines.push(
       `Across the ${opp.count} finding${opp.count === 1 ? "" : "s"} we could put numbers on, the identified recurring range is ${currencyExact(
         opp.low,

@@ -35,7 +35,13 @@ export function automationCandidates(
   findings: Finding[],
 ): AutomationCandidate[] {
   const out: AutomationCandidate[] = [];
-  const has = (id: string) => findings.some((f) => f.id === id);
+  /**
+   * A finding only justifies an automation candidate if prioritization did not
+   * already conclude it was not worth acting on. Recommending automation for a
+   * low-priority finding contradicts the report on the same page.
+   */
+  const has = (id: string) =>
+    findings.some((f) => f.id === id && f.bucket !== "low_priority");
 
   if (has("phone-capacity") && a.callsPerDay !== null) {
     const hours =

@@ -224,6 +224,10 @@ export interface AuditResult {
   quantifiedCount: number;
   automationCandidates: AutomationCandidate[];
   completeness: number;
+  /** The one conclusion the audit stands behind. Drives the report and the CTA. */
+  verdict: import("./verdict").Verdict;
+  /** How, and whether, to ask for a conversation. Derived from the verdict. */
+  offer: import("./verdict").ConversionOffer;
 }
 
 export interface AutomationCandidate {

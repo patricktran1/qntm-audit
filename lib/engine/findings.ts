@@ -235,14 +235,20 @@ const noShowLeakage: Detector = ({ a, k, d }) => {
 };
 
 const physicianAdminLoad: Detector = ({ a, k, d }) => {
-  if (a.physicianAdminHoursPerWeek === null || a.physicianAdminHoursPerWeek < 3)
-    return null;
+  if (a.physicianAdminHoursPerWeek === null) return null;
   if (d.physicianAdminOpportunityCost === null) return null;
 
   const sharePct =
     d.physicianAdminShareOfWorkWeek !== null
       ? d.physicianAdminShareOfWorkWeek * 100
       : null;
+
+  // Some administrative time is irreducible in medicine. Firing on raw hours
+  // meant a large, busy practice with a genuinely light admin load still led
+  // its report with this finding — which made the audit read as canned. Judge
+  // the share of the work week, not the hour count, and require a real load.
+  if (sharePct === null || sharePct < 15) return null;
+  if (a.physicianAdminHoursPerWeek < 5) return null;
 
   return {
     id: "physician-admin-load",
@@ -399,6 +405,9 @@ const billingCostPressure: Detector = ({ a, d }) => {
   if (share < 5.5) return null;
 
   const isOutsourced = a.billingModel === "outsourced" || a.billingModel === "hybrid";
+  // Spread above a 5% reference rate, capped so an extreme input cannot produce
+  // an absurd estimate.
+  const excessPoints = Math.min(share - 5, 4);
 
   return {
     id: "billing-cost",
@@ -431,19 +440,24 @@ const billingCostPressure: Detector = ({ a, d }) => {
         ? "A percentage-of-collections arrangement only makes sense if the vendor is measurably outperforming what the same money would buy internally. The test is not the rate — it is the rate against clean-claim rate, denial rate, and days in A/R. If those are unremarkable, you are paying a variable price for a fixed-cost function."
         : "In-house billing at this cost level should be producing visibly strong A/R performance. If it is not, the constraint is usually tooling and workflow rather than headcount — adding people to an unclear denial process reliably makes it more expensive without making it faster.",
     estimate: {
-      low: a.annualCollections * 0.005,
-      high: a.annualCollections * 0.015,
-      formula:
-        "annual collections × 0.5–1.5 percentage points of achievable billing-cost reduction",
+      // Scaled to the excess over a 5% reference rate, capped at 2 points of
+      // recoverable spread, and halved at the low end.
+      low: a.annualCollections * (excessPoints / 100) * 0.3,
+      high: a.annualCollections * (excessPoints / 100) * 0.6,
+      formula: `annual collections × ${rawPercent(excessPoints, 1)} of billing cost above a 5% reference rate × 30–60% of that spread being recoverable`,
       assumptions: [
+        "5% of collections used as a reference rate for a competitive arrangement — our judgement, not a published benchmark",
         "Assumes a renegotiation or model change is available at equal performance",
         "Contingent on A/R and denial performance holding constant",
-        "Expressed as points of collections, not as a guaranteed vendor discount",
+        "Not a guaranteed vendor discount",
       ],
       kind: "recoverable",
       recurrence: "annual",
     },
-    impact: impactFromDollars(a.annualCollections * 0.015, a.annualCollections),
+    impact: impactFromDollars(
+      a.annualCollections * (excessPoints / 100) * 0.6,
+      a.annualCollections,
+    ),
     effort: isOutsourced ? "low" : "high",
     // The *cost* is known precisely. The *savings* are not — they assume a
     // renegotiation is available at equal performance, which is exactly the
