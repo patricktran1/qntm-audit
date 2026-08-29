@@ -33,8 +33,12 @@ app/
   results/                 the physician-facing report
   demo/                    finished sample reports, for live demonstrations
   talk/                    optional lead capture, reachable only after results
-  internal/brief/          pre-call sales brief (gated, noindex)
+  internal/brief/          pre-call sales brief + discovery outcome capture
+  internal/pilot/          operator dashboard: what we are learning
+  internal/calibration/    predicted pain vs. what discovery calls said
   internal/events/         session event log, for verifying the funnel
+  internal/api/            gated: outcome writes, CSV export
+  api/pilot/               public: session write, CTA mark
   api/events/              analytics sink (no-op unless a webhook is configured)
   api/lead/                lead delivery (accepts and logs when unconfigured)
 lib/
@@ -49,6 +53,8 @@ lib/
     automation.ts          automation candidates, capped at three
     verdict.ts             the conclusion, and the conversion offer it drives
     thresholds.ts          threshold provenance + the empty benchmark contract
+    version.ts             MODEL_VERSION and the compatibility contract
+    fixtures.ts            twelve golden practices and their invariants
     audit.ts               runAudit() — the one entry point
     brief.ts               internal sales brief
     profiles.ts            three synthetic demo practices
@@ -56,6 +62,8 @@ lib/
   experiment.ts            landing-page variant copy
   rate-limit.ts            in-memory fixed-window limiter
   leads/                   lead types, boundary validation, delivery sinks
+  pilot/                   identity, attribution, store, snapshot, analysis,
+                           deterministic guidance, CSV export
   summary.ts               plain-text report for "Copy summary"
   analytics.ts             event vocabulary and a swappable sink
 components/                UI only; no formulas live here
@@ -65,6 +73,9 @@ scripts/
                            and horizontal overflow
   e2e-walkthrough.mjs      completes the audit in a real browser
   a11y-check.mjs           labels, disclosure state, target size, keyboard
+  pilot-loop.mjs           outreach link → audit → lead → outcome → export
+  fake-kv.mjs              in-memory stand-in for the Upstash REST endpoint
+  fixture-report.ts        one line per golden practice
   redteam.ts               runs the audit as each buyer archetype
   inspect.ts               prints full audit output for the demo profiles
   dump-report.ts           prints the text report for an encoded answer string
@@ -95,6 +106,21 @@ routes accept-and-drop.
 | `LEAD_WEBHOOK_URL` | JSON lead delivery |
 | `LEAD_SLACK_WEBHOOK_URL` | Slack message per lead, with a link to the brief |
 | `NEXT_PUBLIC_SITE_URL` | Origin used to build absolute brief links in notifications |
+| `PILOT_KV_REST_URL` | Upstash Redis REST endpoint. **Unset means no pilot data is retained.** |
+| `PILOT_KV_REST_TOKEN` | Upstash REST token |
+
+### Turning the pilot on
+
+The product is fully functional without a pilot store; it simply learns
+nothing, and `/internal/pilot` stays empty and says so. To start collecting:
+
+1. Create an Upstash Redis database (free tier is ample — a 50-practice pilot
+   is a few hundred kilobytes).
+2. Set `PILOT_KV_REST_URL` and `PILOT_KV_REST_TOKEN` from its REST section.
+3. Redeploy. Nothing else changes.
+
+No SDK is added and no schema is required. Swapping the backend later means
+writing one more implementation of `PilotStore`.
 
 Reach the internal area by visiting `/internal/brief?a=<report>&key=<token>`
 once; the key is exchanged for a 12-hour cookie and removed from the URL.
@@ -121,6 +147,13 @@ npm test && npm run typecheck && npm run lint && npm run build
 # Then, against a running server:
 INTERNAL_ACCESS_TOKEN=test-token-abc123 npx next start -p 3210
 
+# For the full pilot loop, with a local stand-in for the store:
+node scripts/fake-kv.mjs 3311 &
+INTERNAL_ACCESS_TOKEN=test-token-abc123 \
+  PILOT_KV_REST_URL=http://127.0.0.1:3311 \
+  PILOT_KV_REST_TOKEN=test-kv-token npx next start -p 3210
+node scripts/pilot-loop.mjs
+
 node scripts/e2e-walkthrough.mjs              # variant A, landing → lead
 E2E_VARIANT=B node scripts/e2e-walkthrough.mjs
 node scripts/a11y-check.mjs                   # labels, state, targets, keyboard
@@ -144,6 +177,8 @@ report to confirm no contact details leaked into the shareable link.
 - [`MODEL.md`](MODEL.md) — every calculation, curve, and assumption
 - [`SALES.md`](SALES.md) — how QNTM should use the output
 - [`METRICS.md`](METRICS.md) — instrumentation and the funnel
+- [`MODEL_CHANGELOG.md`](MODEL_CHANGELOG.md) — what changed in the model, and why
+- [`PRIVACY.md`](PRIVACY.md) — what is stored, what is not, and how to delete it
 - [`SECURITY.md`](SECURITY.md) — what is protected, and what is not
 - [`BENCHMARKS.md`](BENCHMARKS.md) — the contract real data must satisfy
 - [`SCOPE.md`](SCOPE.md) — what this is deliberately not

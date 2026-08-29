@@ -3,6 +3,24 @@
 Everything the engine computes, and why. All of it lives in `lib/engine/` and is
 covered by `tests/`.
 
+**Model version: see `MODEL_VERSION` in `lib/engine/version.ts`.**
+Change history and versioning policy: [`MODEL_CHANGELOG.md`](MODEL_CHANGELOG.md).
+
+This document exists so an informed critic can disagree with us intelligently.
+That is the point — a diagnostic nobody can argue with is not a diagnostic. If
+something here looks wrong to you, the assumption sliders in the report and the
+threshold registry below are where to demonstrate it.
+
+## How to audit this model in fifteen minutes
+
+1. Read *The benchmark decision* — it explains what we deliberately do not have.
+2. Read *Verdict* — it is the only conclusion the product stands behind.
+3. Read *Threshold provenance* — every judgement call in one registry.
+4. Open `lib/engine/fixtures.ts` — twelve synthetic practices, each with the
+   invariants it protects.
+5. Run `npx vitest run tests/integrity.test.ts` — the tests that make it hard
+   for us to bias the audit toward our own services.
+
 ## The benchmark decision
 
 **This product ships no industry benchmark data.** Not MGMA, not AMA, not a
@@ -220,6 +238,26 @@ Bands: 80+ tight operation · 65–79 solid with named gaps · 50–64 meaningfu
 · below 50 substantial leverage available. Bands are computed from the *rounded*
 score so a displayed 65 never carries the band belonging to 64.6.
 
+## Model version and reproducibility
+
+Every stored pilot record carries the `MODEL_VERSION` that produced it, so a
+discovery conversation is always compared against what the physician was
+actually shown rather than against what today's model would say.
+
+**Share links encode answers only, never a computed result.** The consequence,
+stated rather than hidden: a report URL is not a frozen artefact — if the model
+changes, the report changes. That keeps links short and inspectable and means a
+physician re-opening their link sees the current reading of their practice.
+
+Reproducibility is preserved on the pilot side instead:
+
+- `buildSnapshot` freezes the verdict, score, coverage, categories and banded
+  economics at completion time, next to the model version.
+- `tests/fixtures.test.ts` pins the model's behaviour against twelve golden
+  practices, so an unintended change fails a test rather than silently
+  rewriting history.
+- `MODEL_CHANGELOG.md` records what changed, why, and which fixtures moved.
+
 ## Verdict
 
 `lib/engine/verdict.ts` reduces the whole audit to one of four conclusions, and
@@ -232,6 +270,11 @@ healthy             score >= 78 AND no confident high-impact finding
 act                 at least one high-impact finding we are not low-confidence in
 watch               everything else
 ```
+
+The materiality test counts **confident findings only**: a low-confidence
+estimate must never be the sole reason we decline to call a practice healthy.
+Low-confidence findings still appear in the report; they do not get to overrule
+a clean bill of health.
 
 `healthy` suppresses the automation candidates entirely, reframes the dollar
 total as noise rather than opportunity, and returns a conversion offer with
@@ -304,6 +347,21 @@ surfaces the whole registry. Nothing is currently `benchmark`, and the empty
 
 If a threshold is not in that registry, it should not exist in the code.
 
+## Automation mapping and service fit
+
+Automation candidates (`lib/engine/automation.ts`) are derived from findings,
+never the reverse, and are capped at three. A candidate requires its finding to
+have fired **and** to have survived prioritization — a workflow placed in low
+priority is not recommended for automation on the same page that de-prioritised
+it. A `healthy` verdict suppresses them entirely.
+
+Service fit (`lib/engine/brief.ts`) is internal only. At most three services
+may be rated `strong`, a stack review can never be the lead offer whatever the
+spend, and a `healthy` or `insufficient_data` verdict puts *everything* on the
+do-not-pitch list. Calibration tracks service false positives specifically,
+because a service we led with that turned out irrelevant is where trust is
+spent for nothing.
+
 ## What rolls up into the headline range
 
 Only findings whose estimate is `recoverable` or `freed_capacity`. Costs the
@@ -314,15 +372,65 @@ One-time releases are totalled separately.
 The ranges **overlap** — several draw on the same underlying hours and slots —
 and the report says so directly rather than presenting the total as a sum.
 
+### Aggregate conservatism ceiling
+
+Individually conservative findings compound when summed. The rolled-up
+recurring range is therefore capped at **15% of annual collections**
+(`MAX_RECURRING_SHARE`), and when the cap binds the executive summary says so
+and points the reader at the individual findings.
+
+The cap changes what we claim in aggregate, never what we observed: individual
+finding estimates keep their own arithmetic so the evidence stays inspectable.
+
+This was added after the `very-small` fixture — a part-time practice collecting
+$420k — was shown a recurring range worth 21.9% of everything it collects.
+
+## Known limitations
+
+Stated plainly, because a model with no acknowledged limits is not being
+honest about itself.
+
+- **No benchmark data.** Nothing here tells a physician how they compare to
+  anyone else. See *The benchmark decision*.
+- **Visit volume rests on one estimate.** Collections per visit, per hour, and
+  every per-visit figure derive from `patients per provider per day`. If that
+  number was a guess, the economic base moves with it. The report says so and
+  the sales brief lists it as an invalidator.
+- **Overhead is partial by construction.** It excludes rent, supplies,
+  malpractice, physician compensation, and benefits beyond the loaded hourly
+  rate. Never compare it to a published overhead ratio.
+- **The new-patient call share is the weakest assumption in the model** and is
+  the only support for the phone revenue estimate. One week of call-reason
+  tagging replaces it.
+- **Findings overlap.** The aggregate is capped and disclosed, but the total is
+  an order of magnitude, not a sum.
+- **Specialty-specific.** The curves and copy are tuned for dermatology.
+  Applying them to another specialty without recalibration would be a mistake.
+- **Untested against outcomes.** As of this version the model has no recorded
+  discovery outcomes. Its predictions are theory. `/internal/calibration`
+  exists to change that, and until it has data the honest position is that we
+  do not know how often the audit is right.
+
 ## Testing
 
-84 tests in `tests/`, covering arithmetic against hand-computed values, missing
-data (nulls never become NaN or zero), zero-as-an-answer, divide-by-zero,
-assumption sensitivity and directionality, the coverage floor, confidence
-routing, bucket assignment, share-link round-tripping, and the three demo
-profiles end to end.
+287 tests in `tests/`:
 
-Notable regressions the tests caught during development: an empty audit scoring
-0/100 with confidence; the share encoding splitting on `.` and corrupting
-decimal answers; and two findings that presented only derived values with no
-line quoting anything the user had actually said.
+| Suite | What it protects |
+| --- | --- |
+| `derive` | Arithmetic against hand-computed values, missing data, divide-by-zero, assumption sensitivity |
+| `score` | Curve interpolation, coverage floor, band boundaries, zero-as-an-answer |
+| `audit` | Report structure, one-time separation, prioritization, the cap contract |
+| `verdict` | The healthy escape hatch and the four detector regressions |
+| `fixtures` | Twelve golden practices against their invariants |
+| `integrity` | Sales bias, scale invariance, missing data, conservatism, detector dominance, product bias, determinism |
+| `share` | Round-tripping and hostile payloads |
+| `security` | Boundary validation, analytics leakage, rate limiting |
+| `pilot` | Identity, attribution, both write boundaries, demo exclusion, small-sample behaviour, CSV injection |
+
+Notable regressions the tests caught: an empty audit scoring 0/100 with
+confidence; the share encoding splitting on `.` and corrupting decimal answers;
+blank segments decoding to zero and rendering a confident report about a
+practice with no physicians; two findings presenting only derived values with
+nothing the user had actually said; a small practice shown a recurring range
+worth 22% of its collections; and inflated software spend withdrawing a healthy
+verdict through a low-confidence finding.
