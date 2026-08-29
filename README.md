@@ -58,6 +58,7 @@ scripts/
   e2e-walkthrough.mjs      completes the audit in a real browser
   inspect.ts               prints full audit output for the demo profiles
   dump-report.ts           prints the text report for an encoded answer string
+  print-links.ts           prints shareable report links for the demo profiles
 ```
 
 The rule the codebase enforces: **no business logic in `components/`**. If a
