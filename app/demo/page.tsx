@@ -4,6 +4,7 @@ import { DEMO_PROFILES } from "@/lib/engine/profiles";
 import { runAudit } from "@/lib/engine/audit";
 import { encodeAnswers } from "@/lib/share";
 import { currencyExact } from "@/lib/format";
+import { DemoControls } from "@/components/demo-controls";
 
 export const metadata = {
   title: "Sample reports — QNTM Practice Audit",
@@ -15,7 +16,17 @@ export const metadata = {
  * be opened in two taps from a phone in front of someone, with each practice
  * summarised by the conclusion the audit reaches rather than by its inputs.
  */
-export default function DemoPage() {
+export default async function DemoPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ source?: string }>;
+}) {
+  const params = await searchParams;
+  // Default attribution for in-person demonstrations, overridable per event.
+  const source = /^[a-z0-9._-]{1,48}$/i.test(params.source ?? "")
+    ? params.source!.toLowerCase()
+    : "leaderm";
+
   const cards = DEMO_PROFILES.map((p) => {
     const result = runAudit(p.answers);
     return {
@@ -83,15 +94,24 @@ export default function DemoPage() {
         ))}
       </div>
 
-      <div className="mt-12 border-t border-rule pt-6">
-        <p className="text-[13.5px] leading-relaxed text-ink-muted">
-          Would rather run it on a real practice?{" "}
-          <Link href="/audit" className="font-semibold text-accent no-underline">
-            Start the audit
-          </Link>{" "}
-          — about five minutes.
+      <div className="mt-12 rounded-lg border border-rule bg-paper-raised p-6 sm:p-7">
+        <p className="eyebrow">Run it on your own practice</p>
+        <h2 className="display mt-2.5 text-[1.35rem] leading-snug text-ink">
+          About five minutes, on your own numbers
+        </h2>
+        <p className="mt-2.5 max-w-2xl text-[14px] leading-relaxed text-ink-muted">
+          Seventeen questions. You keep the report whether or not we ever speak
+          again, and there is no email gate on the results.
         </p>
+        <Link
+          href={`/audit?source=${encodeURIComponent(source)}`}
+          className="mt-5 inline-flex min-h-12 items-center justify-center rounded-md bg-accent px-7 text-[15px] font-semibold text-white no-underline transition-colors hover:bg-accent-ink"
+        >
+          Start my audit
+        </Link>
       </div>
+
+      <DemoControls source={source} />
     </div>
   );
 }

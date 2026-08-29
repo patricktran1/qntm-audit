@@ -4,6 +4,9 @@ import { buildBrief, type FitLevel } from "@/lib/engine/brief";
 import { runAudit } from "@/lib/engine/audit";
 import { decodeAnswers } from "@/lib/share";
 import { BriefTelemetry } from "./brief-telemetry";
+import { OutcomeForm } from "@/components/internal/outcome-form";
+import { isSessionId } from "@/lib/pilot/attribution";
+import { pilotStore } from "@/lib/pilot/store";
 
 export const metadata = {
   title: "Internal opportunity brief — QNTM",
@@ -33,13 +36,18 @@ function Section({
   );
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function BriefPage({
   searchParams,
 }: {
-  searchParams: Promise<{ a?: string }>;
+  searchParams: Promise<{ a?: string; s?: string }>;
 }) {
-  const { a } = await searchParams;
+  const { a, s } = await searchParams;
   const answers = decodeAnswers(a);
+  const sessionId = isSessionId(s) ? s : "";
+  const store = pilotStore();
+  const existingOutcome = sessionId ? await store.getOutcome(sessionId) : null;
 
   if (!answers) {
     return (
@@ -310,12 +318,29 @@ export default async function BriefPage({
         </p>
       </Section>
 
-      <footer className="mt-12 border-t border-rule pt-6">
+      {/* The pilot's whole point: what the conversation actually said. */}
+      <div className="mt-12">
+        <OutcomeForm
+          sessionId={sessionId}
+          predictedCategory={result.topOpportunities[0]?.category ?? null}
+          predictedFinding={result.topOpportunities[0]?.title ?? null}
+          existing={existingOutcome}
+          storeConfigured={store.configured}
+        />
+      </div>
+
+      <footer className="mt-12 flex flex-wrap items-center gap-6 border-t border-rule pt-6">
         <Link
           href={`/results?a=${encodeURIComponent(a ?? "")}`}
-          className="text-[14px] font-medium text-ink-muted no-underline hover:text-ink"
+          className="inline-flex min-h-11 items-center text-[14px] font-medium text-ink-muted no-underline hover:text-ink"
         >
           ← The report the practice sees
+        </Link>
+        <Link
+          href="/internal/pilot"
+          className="inline-flex min-h-11 items-center text-[14px] font-medium text-ink-muted no-underline hover:text-ink"
+        >
+          Pilot dashboard
         </Link>
       </footer>
     </div>

@@ -397,14 +397,29 @@ export function isStepComplete(step: Step, answers: AuditAnswers): boolean {
   });
 }
 
-/** 0–1. How much of the possible signal the user actually gave us. */
-export function completeness(answers: AuditAnswers): number {
+/**
+ * The answer keys a practice is actually asked, given its own answers. The two
+ * billing sub-questions are mutually exclusive, so a practice using an outside
+ * biller is never shown the in-house FTE field — counting it as "skipped"
+ * would report a question nobody was asked as one physicians cannot answer.
+ */
+export function relevantFields(answers: AuditAnswers): (keyof AuditAnswers)[] {
   const keys = Object.keys(EMPTY_ANSWERS) as (keyof AuditAnswers)[];
-  const relevant = keys.filter((k) => {
+  return keys.filter((k) => {
     if (k === "billingPercent") return isBilledOut(answers);
     if (k === "billingFte") return isBilledIn(answers);
     return true;
   });
+}
+
+/** Fields the practice was asked and answered "I don't know" to. */
+export function skippedFields(answers: AuditAnswers): (keyof AuditAnswers)[] {
+  return relevantFields(answers).filter((k) => answers[k] === null);
+}
+
+/** 0–1. How much of the possible signal the user actually gave us. */
+export function completeness(answers: AuditAnswers): number {
+  const relevant = relevantFields(answers);
   const answered = relevant.filter((k) => answers[k] !== null).length;
   return relevant.length === 0 ? 0 : answered / relevant.length;
 }

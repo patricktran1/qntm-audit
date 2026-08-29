@@ -115,8 +115,13 @@ class RedisStore implements PilotStore {
 
   async putSession(session: PilotSession): Promise<StoreResult> {
     try {
+      // Merge rather than overwrite. A session is written more than once — at
+      // completion, and again when the reader leaves the report carrying their
+      // assumption changes. A blind upsert clobbered the earlier record, which
+      // is why duration and CTA state were disappearing from the dashboard.
+      const merged = await this.mergeSession(session);
       await this.pipeline([
-        ["HSET", SESSION_HASH, session.sessionId, JSON.stringify(session)],
+        ["HSET", SESSION_HASH, session.sessionId, JSON.stringify(merged)],
         // LPUSH then LREM keeps the newest write at the head without
         // duplicating an id that is written more than once.
         ["LREM", SESSION_INDEX, "0", session.sessionId],
@@ -127,6 +132,45 @@ class RedisStore implements PilotStore {
     } catch (e) {
       return { ok: false, error: safeError(e) };
     }
+  }
+
+  /**
+   * Later writes may only add. Lifecycle timestamps and the completion facts
+   * are preserved once set, and assumption changes accumulate by key.
+   */
+  private async mergeSession(incoming: PilotSession): Promise<PilotSession> {
+    const [raw] = await this.pipeline([
+      ["HGET", SESSION_HASH, incoming.sessionId],
+    ]);
+    if (typeof raw !== "string") return incoming;
+
+    let existing: PilotSession;
+    try {
+      existing = JSON.parse(raw) as PilotSession;
+    } catch {
+      return incoming;
+    }
+
+    const byKey = new Map(existing.assumptionChanges.map((c) => [c.key, c]));
+    for (const c of incoming.assumptionChanges) byKey.set(c.key, c);
+
+    return {
+      ...existing,
+      ...incoming,
+      // First completion wins: a later write is an update, not a new audit.
+      completedAt: existing.completedAt,
+      firstSeen: existing.firstSeen,
+      durationMs: existing.durationMs ?? incoming.durationMs,
+      // Lifecycle flags are set elsewhere and must survive a session rewrite.
+      ctaClickedAt: existing.ctaClickedAt ?? incoming.ctaClickedAt,
+      leadSubmittedAt: existing.leadSubmittedAt ?? incoming.leadSubmittedAt,
+      // Attribution is first-touch; do not let a later write erase it.
+      attribution: Object.keys(existing.attribution).length
+        ? existing.attribution
+        : incoming.attribution,
+      isDemo: existing.isDemo || incoming.isDemo,
+      assumptionChanges: [...byKey.values()],
+    };
   }
 
   async markSession(

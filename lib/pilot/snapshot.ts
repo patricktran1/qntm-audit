@@ -1,4 +1,5 @@
 import { collectionsBand, providerBand } from "../analytics";
+import { skippedFields } from "../engine/questions";
 import { MODEL_VERSION } from "../engine/version";
 import type { AuditResult, Category } from "../engine/types";
 import type { AuditSnapshot, OpportunityBand } from "./types";
@@ -30,9 +31,9 @@ export function buildSnapshot(result: AuditResult): AuditSnapshot {
   const categories = new Set<Category>();
   for (const f of result.findings) categories.add(f.category);
 
-  const skippedFields = (
-    Object.keys(result.answers) as (keyof typeof result.answers)[]
-  ).filter((k) => result.answers[k] === null);
+  // Only questions the practice was actually asked. A field hidden by the
+  // billing-model branch is not an unanswered question.
+  const skipped = skippedFields(result.answers);
 
   return {
     modelVersion: MODEL_VERSION,
@@ -56,6 +57,6 @@ export function buildSnapshot(result: AuditResult): AuditSnapshot {
     unscoredDimensions: result.score.dimensions
       .filter((d) => d.score === null)
       .map((d) => d.key),
-    skippedFields,
+    skippedFields: skipped,
   };
 }

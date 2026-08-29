@@ -7,10 +7,10 @@ import { INTERNAL_COOKIE } from "@/middleware";
 /**
  * Records a discovery-call outcome. Operator-only.
  *
- * The middleware gate covers /internal pages but not API routes, so this
- * endpoint re-checks the internal cookie itself rather than assuming it is
- * unreachable. Writes here shape model calibration, so an anonymous write
- * would be worse than no write at all.
+ * Lives under /internal so it sits inside the middleware gate and inside the
+ * internal cookie's path scope. It re-checks the cookie itself as well: writes
+ * here shape model calibration, and an anonymous write would be worse than no
+ * write at all.
  */
 
 const MAX_BODY_BYTES = 8 * 1024;

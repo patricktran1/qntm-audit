@@ -45,7 +45,9 @@ function guardInternal(request: NextRequest): NextResponse {
 
   // A key in the URL exchanges itself for a cookie and is then dropped from
   // the address bar, so the secret does not persist in history or in a
-  // screen-shared URL.
+  // screen-shared URL. Only ever on a navigation: redirecting a POST would
+  // silently drop its body.
+  if (request.method !== "GET") return notFound();
   const key = request.nextUrl.searchParams.get("key");
   if (key && secretsMatch(key, token)) {
     const clean = request.nextUrl.clone();
