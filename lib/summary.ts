@@ -14,11 +14,16 @@ export function textSummary(r: AuditResult, url?: string): string {
   L.push(rule);
   L.push("");
 
-  if (r.score.overall !== null) {
-    L.push(`PRACTICE LEVERAGE SCORE: ${r.score.overall}/100 — ${r.score.band}`);
+  if (r.score.scoredCount > 0) {
+    L.push(
+      r.score.overall !== null
+        ? `PRACTICE LEVERAGE SCORE: ${r.score.overall}/100 — ${r.score.band}`
+        : `PRACTICE LEVERAGE SCORE: withheld — ${r.score.band}`,
+    );
     L.push(
       `Scored across ${r.score.scoredCount} of ${r.score.totalCount} dimensions.`,
     );
+    if (r.score.overall === null) L.push(wrap(r.score.bandDescription));
     L.push("");
     for (const d of r.score.dimensions) {
       L.push(

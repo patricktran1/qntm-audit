@@ -18,10 +18,18 @@ export function ScorePanel({ score }: { score: PracticeScore }) {
         <div>
           <p className="eyebrow">Practice Leverage Score</p>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="tnum display text-[4.5rem] leading-none text-ink">
-              {score.overall ?? "—"}
+            <span
+              className={`tnum display leading-none ${
+                score.overall === null
+                  ? "text-[2.5rem] text-ink-faint"
+                  : "text-[4.5rem] text-ink"
+              }`}
+            >
+              {score.overall ?? "Withheld"}
             </span>
-            <span className="tnum text-[15px] text-ink-faint">/ 100</span>
+            {score.overall !== null ? (
+              <span className="tnum text-[15px] text-ink-faint">/ 100</span>
+            ) : null}
           </div>
           <p className="mt-3 text-[15px] font-semibold text-ink">
             {score.band}
@@ -30,9 +38,10 @@ export function ScorePanel({ score }: { score: PracticeScore }) {
             {score.bandDescription}
           </p>
           <p className="mt-4 border-t border-rule pt-3 text-[12px] leading-relaxed text-ink-faint">
-            A low score means leverage is available, not that the practice is
-            badly run. Scored on {score.scoredCount} of {score.totalCount}{" "}
-            dimensions
+            {score.overall !== null
+              ? "A low score means leverage is available, not that the practice is badly run. "
+              : ""}
+            Scored on {score.scoredCount} of {score.totalCount} dimensions
             {score.coverage < 0.99
               ? " — the rest were skipped, and unscored dimensions are excluded rather than counted as zero."
               : "."}

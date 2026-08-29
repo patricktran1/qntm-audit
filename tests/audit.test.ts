@@ -49,11 +49,25 @@ describe("runAudit — determinism and safety", () => {
       billingModel: "in_house",
     };
     const r = runAudit(sparse);
-    expect(r.score.overall).not.toBeNull();
+    // Nothing to diagnose, so nothing is claimed: no score, no findings, no
+    // dollar range — and a plan that starts by going to get the numbers.
+    expect(r.score.overall).toBeNull();
     expect(r.score.coverage).toBeLessThan(1);
+    expect(r.opportunityHigh).toBe(0);
     expect(r.openQuestions.length).toBeGreaterThanOrEqual(4);
+    expect(r.plan[0]!.week).toBe("Week 1");
+    expect(r.executiveSummary.join(" ")).not.toMatch(/Leverage Score: \d/);
     const text = r.findings.map((f) => f.headline).join(" ");
     expect(text).not.toMatch(/NaN|undefined/);
+  });
+
+  it("always opens the plan in week one and closes it in week four", () => {
+    const cases = [EMPTY_ANSWERS, ...DEMO_PROFILES.map((p) => p.answers)];
+    for (const answers of cases) {
+      const plan = runAudit(answers).plan;
+      expect(plan[0]!.week).toBe("Week 1");
+      expect(plan.at(-1)!.week).toBe("Week 4");
+    }
   });
 
   it("treats zeroes as answers, not as skips", () => {

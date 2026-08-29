@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { bandFor, computeScore, scoreFromAnchors } from "@/lib/engine/score";
+import {
+  MIN_SCORE_COVERAGE,
+  bandFor,
+  computeScore,
+  scoreFromAnchors,
+} from "@/lib/engine/score";
 import { derive } from "@/lib/engine/derive";
 import { DEFAULT_ASSUMPTIONS } from "@/lib/engine/assumptions";
 import { EMPTY_ANSWERS } from "@/lib/engine/questions";
@@ -74,7 +79,27 @@ describe("computeScore", () => {
     }
   });
 
-  it("only counts weight from dimensions it could actually score", () => {
+  it("withholds the overall score when too little of the model could be computed", () => {
+    const thin: AuditAnswers = {
+      ...EMPTY_ANSWERS,
+      physicians: 2,
+      apps: 0,
+      annualCollections: 2_000_000,
+      clinicalDaysPerWeek: 4,
+      patientsPerProviderPerDay: 25,
+      frontOfficeFte: 3,
+      clinicalStaffFte: 4,
+    };
+    const s = score(thin);
+    expect(s.coverage).toBeLessThan(MIN_SCORE_COVERAGE);
+    // Some dimensions scored, but the headline number is withheld rather than
+    // extrapolated from a minority of the model.
+    expect(s.scoredCount).toBeGreaterThan(0);
+    expect(s.overall).toBeNull();
+    expect(s.band).toMatch(/not enough answered/i);
+  });
+
+  it("publishes a score once enough of the model is computable", () => {
     const partial: AuditAnswers = {
       ...EMPTY_ANSWERS,
       physicians: 2,
@@ -82,12 +107,19 @@ describe("computeScore", () => {
       annualCollections: 2_000_000,
       clinicalDaysPerWeek: 4,
       patientsPerProviderPerDay: 25,
+      frontOfficeFte: 3,
+      clinicalStaffFte: 4,
+      billingModel: "outsourced",
+      billingPercent: 6,
       noShowRate: 8,
+      thirdNextAvailableDays: 20,
+      physicianAdminHoursPerWeek: 9,
+      daysInAR: 40,
     };
     const s = score(partial);
-    expect(s.overall).not.toBeNull();
-    expect(s.coverage).toBeGreaterThan(0);
+    expect(s.coverage).toBeGreaterThanOrEqual(MIN_SCORE_COVERAGE);
     expect(s.coverage).toBeLessThan(1);
+    expect(s.overall).not.toBeNull();
     expect(s.scoredCount).toBeLessThan(s.totalCount);
   });
 

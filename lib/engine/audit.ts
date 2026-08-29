@@ -172,6 +172,15 @@ function thirtyDayPlan(top: Finding[], a: AuditAnswers): ActionItem[] {
       owner: "Practice manager",
       unlocks: `Confirms or kills the largest finding in this report (${top[0].title.toLowerCase()}) before any money is committed.`,
     });
+  else
+    plan.push({
+      week: "Week 1",
+      action:
+        "Pull the five operating numbers this audit asked for and could not get: days in A/R, no-show rate, inbound call volume, unanswered call rate, and third-next-available appointment. Four of the five come out of systems you already pay for.",
+      owner: "Practice manager",
+      unlocks:
+        "Without these there is nothing to diagnose. Whether your systems can produce them at all is the first finding.",
+    });
 
   if (a.callsPerDay !== null || a.unansweredCallPercent !== null)
     plan.push({
@@ -278,6 +287,10 @@ function executiveSummary(
           ? ` Scored across ${score.scoredCount} of ${score.totalCount} dimensions; the rest were skipped.`
           : ""
       }`,
+    );
+  } else if (score.scoredCount > 0) {
+    lines.push(
+      `We are not publishing an overall Practice Leverage Score for this audit. ${score.bandDescription}`,
     );
   }
 

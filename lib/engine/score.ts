@@ -22,6 +22,13 @@ import type {
  * A low score means there is leverage available, not that the practice is bad.
  */
 
+/**
+ * Minimum share of the scoring model's weight that must be computable before we
+ * publish an overall number. A composite drawn from a quarter of the model is
+ * not a score, it is an extrapolation.
+ */
+export const MIN_SCORE_COVERAGE = 0.5;
+
 /** Piecewise-linear interpolation across published anchor points. */
 export function scoreFromAnchors(
   value: number,
@@ -411,7 +418,11 @@ export function computeScore(
         softwareShare !== null
           ? `, with software at ${(softwareShare * 100).toFixed(1)}% of collections`
           : ""
-      }. Metrics your stack cannot produce are metrics you cannot manage.`,
+      }. ${
+        known === trackable.length
+          ? "Metrics your stack cannot produce are metrics you cannot manage — yours produces all five."
+          : "This scores skipped answers as untracked, which is the pessimistic reading. If you do have these numbers and simply did not have them to hand, re-run with them and this dimension will move."
+      }`,
       anchors: `Software as % of collections: ${describe(
         SOFTWARE_SHARE_ANCHORS.map(([x, sc]) => [Number((x * 100).toFixed(1)), sc] as [number, number]),
         "%",
@@ -422,22 +433,35 @@ export function computeScore(
   const scored = dims.filter((x) => x.score !== null);
   const totalWeight = dims.reduce((s, x) => s + x.weight, 0);
   const scoredWeight = scored.reduce((s, x) => s + x.weight, 0);
+  const coverage = totalWeight === 0 ? 0 : scoredWeight / totalWeight;
+
+  // Below this, a composite would be extrapolating from a minority of the
+  // practice and would read far more confident than the data supports. We
+  // publish the dimensions we could score and withhold the headline number.
   const overall =
-    scoredWeight === 0
+    scoredWeight === 0 || coverage < MIN_SCORE_COVERAGE
       ? null
       : scored.reduce((s, x) => s + x.score! * x.weight, 0) / scoredWeight;
 
   // Band from the rounded value, so a displayed 65 never reads as the band
   // belonging to 64.6.
   const rounded = overall === null ? null : Math.round(overall);
-  const { band, bandDescription } = bandFor(rounded);
+  const { band, bandDescription } =
+    overall === null && scoredWeight > 0
+      ? {
+          band: "Not enough answered to score",
+          bandDescription: `Only ${Math.round(
+            coverage * 100,
+          )}% of the scoring model could be computed from your answers. The dimensions below are real; a single headline number built on this little would read more confident than the data supports.`,
+        }
+      : bandFor(rounded);
 
   return {
     overall: rounded,
     band,
     bandDescription,
     dimensions: dims,
-    coverage: totalWeight === 0 ? 0 : scoredWeight / totalWeight,
+    coverage,
     scoredCount: scored.length,
     totalCount: dims.length,
   };
