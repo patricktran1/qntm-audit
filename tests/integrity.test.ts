@@ -315,3 +315,15 @@ describe("determinism", () => {
     }
   });
 });
+
+describe("pilot freeze", () => {
+  it("pins the running model to the frozen version while the freeze is active", async () => {
+    const { MODEL_VERSION, PILOT_FREEZE } = await import("@/lib/engine/version");
+    // While the pilot freeze is active, bumping MODEL_VERSION must be a
+    // deliberate act that also lifts or moves the freeze — never a side
+    // effect of an ordinary change. This is the tripwire.
+    if (PILOT_FREEZE.active) {
+      expect(MODEL_VERSION).toBe(PILOT_FREEZE.version);
+    }
+  });
+});

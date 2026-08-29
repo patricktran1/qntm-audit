@@ -37,6 +37,15 @@ const browser = await chromium.launch(
   existsSync(CHROME) ? { executablePath: CHROME } : {},
 );
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+// Mark this browser as QA traffic before anything loads, so a walkthrough run
+// against a store-backed environment cannot pollute pilot learning.
+await ctx.addInitScript(() => {
+  try {
+    window.localStorage.setItem("qntm.pilot.test", "1");
+  } catch {
+    // Storage unavailable; the walkthrough still runs.
+  }
+});
 const page = await ctx.newPage();
 const problems = [];
 page.on("console", (m) => {

@@ -20,11 +20,23 @@ import {
   coverageInsight,
   findingInsight,
   formatRatio,
+  isRealSession,
   pilotHealth,
   verdictDistribution,
 } from "@/lib/pilot/analyse";
+import { sanitizeAttributionValue, formatAttribution } from "@/lib/pilot/attribution";
 import { pilotGuidance } from "@/lib/pilot/guidance";
+import {
+  SESSION_FILTERS,
+  STATUS_LABELS,
+  cohortSummary,
+  knownCohorts,
+  needsAttention,
+  sessionStatus,
+  stopConditions,
+} from "@/lib/pilot/status";
 import { pilotStore } from "@/lib/pilot/store";
+import type { DiscoveryOutcome, PilotSession } from "@/lib/pilot/types";
 
 export const dynamic = "force-dynamic";
 
@@ -39,9 +51,97 @@ const SEVERITY_STYLE = {
   watch: "border-rule-strong bg-paper-sunk text-ink-faint",
 } as const;
 
-export default async function PilotPage() {
+function SessionRow({
+  s,
+  outcome,
+}: {
+  s: PilotSession;
+  outcome: DiscoveryOutcome | undefined;
+}) {
+  const status = sessionStatus(s, outcome);
+  return (
+    <Row>
+      <Cell first>
+        <span className="tnum text-[12.5px]">{s.sessionId.slice(3, 11)}</span>
+        <span className="ml-2 text-[12px] text-ink-faint">
+          {new Date(s.completedAt).toLocaleDateString()}
+        </span>
+        {s.isDemo ? (
+          <span className="ml-2 text-[10.5px] uppercase tracking-wide text-signal-mid">
+            demo
+          </span>
+        ) : null}
+        {s.isTest === true ? (
+          <span className="ml-2 text-[10.5px] uppercase tracking-wide text-signal-mid">
+            test
+          </span>
+        ) : null}
+      </Cell>
+      <Cell muted>{STATUS_LABELS[status]}</Cell>
+      <Cell muted>{s.snapshot.verdict.replace(/_/g, " ")}</Cell>
+      <Cell>{s.snapshot.score ?? "—"}</Cell>
+      <Cell muted>{s.snapshot.topCategory ?? "—"}</Cell>
+      <Cell muted>{Math.round(s.snapshot.coverage * 100)}%</Cell>
+      <Cell muted>
+        <span className="tnum text-[12px]">{formatAttribution(s.attribution)}</span>
+      </Cell>
+      <Cell muted>
+        <span className="tnum text-[12px]">{s.snapshot.modelVersion}</span>
+      </Cell>
+      <Cell>
+        <span className="flex items-center justify-end gap-3 whitespace-nowrap">
+          <Link
+            href={`/internal/call?s=${s.sessionId}`}
+            prefetch={false}
+            className="inline-flex min-h-11 items-center text-[13px] font-semibold text-accent no-underline"
+          >
+            Call
+          </Link>
+          <Link
+            href={`/internal/brief?a=${encodeURIComponent(s.report)}&s=${s.sessionId}`}
+            // Sixty rows prefetching sixty briefs is pure waste on an
+            // operator table nobody scrolls looking for links.
+            prefetch={false}
+            className="inline-flex min-h-11 items-center text-[13px] font-semibold text-accent no-underline"
+          >
+            Brief
+          </Link>
+        </span>
+      </Cell>
+    </Row>
+  );
+}
+
+const SESSION_HEAD = [
+  "Session",
+  "Status",
+  "Verdict",
+  "Score",
+  "Leading",
+  "Coverage",
+  "Attribution",
+  "Model",
+  "",
+];
+
+export default async function PilotPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const activeFilter =
+    typeof params.filter === "string"
+      ? SESSION_FILTERS.find((f) => f.key === params.filter) ?? null
+      : null;
+  const activeCohort =
+    typeof params.cohort === "string"
+      ? sanitizeAttributionValue(params.cohort) ?? null
+      : null;
+
   const store = pilotStore();
   const { sessions, outcomes } = await store.readAll();
+  const outcomeById = new Map(outcomes.map((o) => [o.sessionId, o]));
 
   const health = pilotHealth(sessions);
   const verdicts = verdictDistribution(sessions);
@@ -50,17 +150,44 @@ export default async function PilotPage() {
   const assumptions = assumptionChallenges(sessions);
   const conversion = conversionBreakdowns(sessions);
   const guidance = pilotGuidance(sessions, outcomes);
+  const attention = needsAttention(sessions, outcomes);
+  const stops = stopConditions(sessions, outcomes);
+  const triggeredStops = stops.filter((s) => s.triggered);
+  const cohorts = knownCohorts(sessions);
+  const cohortStats = activeCohort
+    ? cohortSummary(sessions, outcomes, activeCohort)
+    : null;
 
   const minutes = (ms: number | null) =>
     ms === null ? "—" : `${(ms / 60_000).toFixed(1)}m`;
   const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v * 100)}%`);
 
+  // The list an operator scans. Filters apply over real sessions only; the
+  // unfiltered list shows everything with demo/test rows flagged.
+  const listed = activeFilter
+    ? sessions
+        .filter(isRealSession)
+        .filter((s) => activeFilter.matches(s, outcomeById.get(s.sessionId)))
+    : sessions;
+
   return (
     <InternalShell
       title="Pilot"
-      subtitle={`What we are learning from real practices. Demo sessions are excluded from every figure below. Model ${MODEL_VERSION}.`}
+      subtitle={`What we are learning from real practices. Demo and test sessions are excluded from every figure below. Model ${MODEL_VERSION}.`}
       actions={
         <>
+          <Link
+            href="/internal/setup"
+            className="inline-flex min-h-11 items-center rounded-md border border-rule-strong px-3.5 text-[13px] font-medium text-ink-muted no-underline hover:text-ink"
+          >
+            Setup
+          </Link>
+          <Link
+            href="/internal/campaigns"
+            className="inline-flex min-h-11 items-center rounded-md border border-rule-strong px-3.5 text-[13px] font-medium text-ink-muted no-underline hover:text-ink"
+          >
+            Campaigns
+          </Link>
           <Link
             href="/internal/calibration"
             className="inline-flex min-h-11 items-center rounded-md border border-rule-strong px-3.5 text-[13px] font-medium text-ink-muted no-underline hover:text-ink"
@@ -77,6 +204,114 @@ export default async function PilotPage() {
       }
     >
       <StoreBanner configured={store.configured} />
+
+      {/* ── Needs attention ───────────────────────────────────────────── */}
+      <Panel
+        title="Needs attention"
+        note="Deterministic follow-up queue: what happened and why it needs a human. What to do about it is the runbook's job, not this page's."
+      >
+        {attention.length === 0 ? (
+          <EmptyState>
+            Nothing waiting. Every lead has an outcome, every recorded call is
+            complete, and no data-quality rule is firing.
+          </EmptyState>
+        ) : (
+          <ul className="space-y-3">
+            {attention.map((item, i) => (
+              <li
+                key={`${item.kind}-${item.sessionId}-${i}`}
+                className={`rounded-lg border px-5 py-4 ${
+                  item.kind === "lead_needs_response"
+                    ? "border-signal-weak/40 bg-signal-weak/5"
+                    : "border-rule bg-paper-raised"
+                }`}
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                  <p className="text-[14.5px] font-semibold text-ink">
+                    {item.headline}
+                  </p>
+                  <span className="tnum text-[12px] text-ink-faint">
+                    {item.sessionId.slice(3, 11)}
+                  </span>
+                </div>
+                <p className="tnum mt-1.5 text-[13px] leading-relaxed text-ink-muted">
+                  {item.detail}
+                </p>
+                <div className="mt-2 flex gap-4">
+                  <Link
+                    href={`/internal/call?s=${item.sessionId}`}
+                    prefetch={false}
+                    className="text-[13px] font-semibold text-accent no-underline"
+                  >
+                    Call view
+                  </Link>
+                  <Link
+                    href={`/internal/calibration`}
+                    prefetch={false}
+                    className="text-[13px] font-semibold text-accent no-underline"
+                  >
+                    Calibration
+                  </Link>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+
+      {/* ── Stop conditions ───────────────────────────────────────────── */}
+      <Panel
+        title="Stop conditions"
+        note="Operator guardrails, not statistical inference. Thresholds were set in advance so they cannot be argued with in the moment. Nothing stops automatically and nothing here touches the model."
+      >
+        {triggeredStops.length > 0 ? (
+          <ul className="space-y-3">
+            {triggeredStops.map((s) => (
+              <li
+                key={s.id}
+                className="rounded-lg border border-signal-weak/40 bg-signal-weak/5 px-5 py-4"
+              >
+                <p className="text-[14.5px] font-semibold text-ink">{s.title}</p>
+                <p className="tnum mt-1.5 text-[13px] leading-relaxed text-ink-muted">
+                  {s.evidence}
+                </p>
+                <p className="mt-1.5 text-[13px] leading-relaxed text-ink">
+                  {s.threshold}
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyState>No stop condition is firing.</EmptyState>
+        )}
+        <details className="mt-3">
+          <summary className="cursor-pointer text-[13px] font-medium text-ink-muted">
+            All guardrails and their current readings
+          </summary>
+          <div className="mt-3 rounded-lg border border-rule bg-paper-raised px-5 py-2">
+            {stops.map((s) => (
+              <div
+                key={s.id}
+                className="flex gap-4 border-b border-rule py-3 last:border-b-0"
+              >
+                <span
+                  className={`w-16 shrink-0 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] ${
+                    s.triggered ? "text-signal-weak" : "text-ink-faint"
+                  }`}
+                >
+                  {s.triggered ? "FIRING" : "QUIET"}
+                </span>
+                <div>
+                  <p className="text-[13.5px] font-medium text-ink">{s.title}</p>
+                  <p className="tnum mt-0.5 text-[12.5px] leading-relaxed text-ink-muted">
+                    {s.evidence} {s.threshold}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      </Panel>
 
       {/* ── What we should learn next ─────────────────────────────────── */}
       <Panel
@@ -106,6 +341,85 @@ export default async function PilotPage() {
         </ul>
       </Panel>
 
+      {/* ── Cohort view ───────────────────────────────────────────────── */}
+      <Panel
+        title="Cohorts"
+        note="A named cohort is a label for analysis, not a target to hit. Invitation counts are not tracked — links are generated and sent by hand, outside the product — so the funnel here begins at completion."
+      >
+        <div className="flex flex-wrap gap-2">
+          {cohorts.length === 0 && !activeCohort ? (
+            <p className="text-[13px] text-ink-faint">
+              No cohort attribution recorded yet. Generate links with
+              cohort=first10 on the campaigns page.
+            </p>
+          ) : (
+            ["first10", ...cohorts.filter((c) => c !== "first10")].map((c) => (
+              <Link
+                key={c}
+                href={activeCohort === c ? "/internal/pilot" : `/internal/pilot?cohort=${c}`}
+                prefetch={false}
+                className={`inline-flex min-h-11 items-center rounded-md border px-3.5 text-[13px] font-medium no-underline ${
+                  activeCohort === c
+                    ? "border-accent text-accent"
+                    : "border-rule-strong text-ink-muted hover:text-ink"
+                }`}
+              >
+                {c}
+              </Link>
+            ))
+          )}
+        </div>
+
+        {cohortStats ? (
+          <div className="mt-4">
+            <TileGrid>
+              <StatTile label="Completions" value={cohortStats.completions} />
+              <StatTile
+                label="Leads"
+                value={cohortStats.leads.numerator}
+                detail={formatRatio(cohortStats.leads)}
+              />
+              <StatTile
+                label="Outcomes recorded"
+                value={cohortStats.outcomesRecorded.numerator}
+                detail={formatRatio(cohortStats.outcomesRecorded)}
+              />
+              <StatTile
+                label="Assumption changes"
+                value={cohortStats.assumptionChanges}
+              />
+            </TileGrid>
+            <div className="mt-3 rounded-lg border border-rule bg-paper-raised p-5">
+              <p className="tnum text-[13px] leading-relaxed text-ink-muted">
+                Among comparable recorded calls: prediction agreed{" "}
+                {formatRatio(cohortStats.agreements)}, disagreed{" "}
+                {formatRatio(cohortStats.disagreements)}. Where economics were
+                discussed: credible {formatRatio(cohortStats.economicsCredible)},
+                challenged {formatRatio(cohortStats.economicsChallenged)}.
+              </p>
+              <p className="mt-2 text-[12.5px] leading-relaxed text-ink-faint">
+                At this sample size the rows below matter more than the
+                aggregate. Read who disagreed, and why, before reading any rate.
+              </p>
+            </div>
+            <div className="mt-4">
+              <Table head={SESSION_HEAD} minWidth={1080}>
+                {sessions
+                  .filter(isRealSession)
+                  .filter((s) => s.attribution.cohort === activeCohort)
+                  .map((s) => (
+                    <SessionRow
+                      key={s.sessionId}
+                      s={s}
+                      outcome={outcomeById.get(s.sessionId)}
+                    />
+                  ))}
+              </Table>
+            </div>
+          </div>
+        ) : null}
+      </Panel>
+
       {/* ── Pilot health ──────────────────────────────────────────────── */}
       <Panel
         title="Pilot health"
@@ -126,7 +440,7 @@ export default async function PilotPage() {
           <StatTile
             label="Median time to complete"
             value={minutes(health.medianDurationMs)}
-            detail={`${health.demoSessions} demo session${health.demoSessions === 1 ? "" : "s"} excluded`}
+            detail={`${health.demoSessions} demo, ${health.testSessions} test excluded`}
           />
         </TileGrid>
 
@@ -383,60 +697,72 @@ export default async function PilotPage() {
       {/* ── Session list ──────────────────────────────────────────────── */}
       <Panel
         title="Sessions"
-        note="Newest first. Open a brief to record what the discovery conversation actually said."
+        note="Newest first. Filters answer one operator question each and apply to real sessions only; the unfiltered list shows demo and test rows flagged."
       >
-        <Table
-          head={["Session", "Verdict", "Score", "Leading", "Source", "Lead", ""]}
-          minWidth={860}
-        >
-          {sessions.length === 0 ? (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <Link
+            href="/internal/pilot"
+            prefetch={false}
+            className={`inline-flex min-h-11 items-center rounded-md border px-3.5 text-[13px] font-medium no-underline ${
+              activeFilter === null
+                ? "border-accent text-accent"
+                : "border-rule-strong text-ink-muted hover:text-ink"
+            }`}
+          >
+            All ({sessions.length})
+          </Link>
+          {SESSION_FILTERS.map((f) => {
+            const count = sessions
+              .filter(isRealSession)
+              .filter((s) => f.matches(s, outcomeById.get(s.sessionId))).length;
+            return (
+              <Link
+                key={f.key}
+                href={`/internal/pilot?filter=${f.key}`}
+                prefetch={false}
+                className={`inline-flex min-h-11 items-center rounded-md border px-3.5 text-[13px] font-medium no-underline ${
+                  activeFilter?.key === f.key
+                    ? "border-accent text-accent"
+                    : "border-rule-strong text-ink-muted hover:text-ink"
+                }`}
+              >
+                {f.label} ({count})
+              </Link>
+            );
+          })}
+        </div>
+
+        <Table head={SESSION_HEAD} minWidth={1080}>
+          {listed.length === 0 ? (
             <Row>
               <Cell first muted>
-                Nothing recorded yet
+                {activeFilter
+                  ? `No session matches "${activeFilter.label}"`
+                  : "Nothing recorded yet"}
               </Cell>
-              <Cell muted>—</Cell>
-              <Cell muted>—</Cell>
-              <Cell muted>—</Cell>
-              <Cell muted>—</Cell>
-              <Cell muted>—</Cell>
-              <Cell muted>—</Cell>
+              {SESSION_HEAD.slice(1).map((_, i) => (
+                <Cell key={i} muted>
+                  —
+                </Cell>
+              ))}
             </Row>
           ) : (
-            sessions.slice(0, 60).map((s) => (
-              <Row key={s.sessionId}>
-                <Cell first>
-                  <span className="tnum text-[12.5px]">
-                    {s.sessionId.slice(3, 11)}
-                  </span>
-                  <span className="ml-2 text-[12px] text-ink-faint">
-                    {new Date(s.completedAt).toLocaleDateString()}
-                  </span>
-                  {s.isDemo ? (
-                    <span className="ml-2 text-[10.5px] uppercase tracking-wide text-signal-mid">
-                      demo
-                    </span>
-                  ) : null}
-                </Cell>
-                <Cell muted>{s.snapshot.verdict.replace(/_/g, " ")}</Cell>
-                <Cell>{s.snapshot.score ?? "—"}</Cell>
-                <Cell muted>{s.snapshot.topCategory ?? "—"}</Cell>
-                <Cell muted>{s.attribution.source ?? "—"}</Cell>
-                <Cell muted>{s.leadSubmittedAt ? "yes" : s.ctaClickedAt ? "cta" : "—"}</Cell>
-                <Cell>
-                  <Link
-                    href={`/internal/brief?a=${encodeURIComponent(s.report)}&s=${s.sessionId}`}
-                    // Sixty rows prefetching sixty briefs is pure waste on an
-                    // operator table nobody scrolls looking for links.
-                    prefetch={false}
-                    className="inline-flex min-h-11 items-center justify-end text-[13px] font-semibold text-accent no-underline"
-                  >
-                    Brief
-                  </Link>
-                </Cell>
-              </Row>
-            ))
+            listed
+              .slice(0, 60)
+              .map((s) => (
+                <SessionRow
+                  key={s.sessionId}
+                  s={s}
+                  outcome={outcomeById.get(s.sessionId)}
+                />
+              ))
           )}
         </Table>
+        <p className="mt-3 text-[12.5px] leading-relaxed text-ink-faint">
+          Statuses begin at completion: nothing is written before an audit is
+          finished, so &ldquo;visited&rdquo; and &ldquo;started&rdquo; are not
+          knowable states and are not shown.
+        </p>
       </Panel>
     </InternalShell>
   );

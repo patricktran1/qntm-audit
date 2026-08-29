@@ -23,6 +23,15 @@ import { formatAttribution } from "./attribution";
  * demonstration is not evidence about a real practice.
  */
 
+/**
+ * The one filter every learning surface shares. Real pilot evidence is a
+ * session that is neither a booth demonstration nor QA traffic. Older records
+ * predate the isTest field, so the check must tolerate its absence.
+ */
+export function isRealSession(s: PilotSession): boolean {
+  return !s.isDemo && s.isTest !== true;
+}
+
 /** A count with its denominator, so the UI can always show `3 / 7 (43%)`. */
 export interface Ratio {
   numerator: number;
@@ -72,6 +81,7 @@ function tally<T extends string>(
 export interface PilotHealth {
   completedAudits: number;
   demoSessions: number;
+  testSessions: number;
   ctaClicks: number;
   leads: number;
   ctaRate: Ratio;
@@ -83,7 +93,7 @@ export interface PilotHealth {
 }
 
 export function pilotHealth(sessions: PilotSession[]): PilotHealth {
-  const real = sessions.filter((s) => !s.isDemo);
+  const real = sessions.filter(isRealSession);
   const ctaClicks = real.filter((s) => s.ctaClickedAt).length;
   const leads = real.filter((s) => s.leadSubmittedAt).length;
 
@@ -106,7 +116,8 @@ export function pilotHealth(sessions: PilotSession[]): PilotHealth {
 
   return {
     completedAudits: real.length,
-    demoSessions: sessions.length - real.length,
+    demoSessions: sessions.filter((s) => s.isDemo).length,
+    testSessions: sessions.filter((s) => !s.isDemo && s.isTest === true).length,
     ctaClicks,
     leads,
     ctaRate: ratio(ctaClicks, real.length),
@@ -146,7 +157,7 @@ export interface VerdictDistribution {
 }
 
 export function verdictDistribution(sessions: PilotSession[]): VerdictDistribution {
-  const real = sessions.filter((s) => !s.isDemo);
+  const real = sessions.filter(isRealSession);
   const levels = real.map((s) => s.snapshot.verdict);
   const sufficient = levels.filter((v) => v !== "insufficient_data");
   const acts = sufficient.filter((v) => v === "act").length;
@@ -195,7 +206,7 @@ const FIELD_LABELS: Record<string, string> = (() => {
 })();
 
 export function coverageInsight(sessions: PilotSession[]): CoverageInsight {
-  const real = sessions.filter((s) => !s.isDemo);
+  const real = sessions.filter(isRealSession);
   const coverages = real.map((s) => s.snapshot.coverage).sort((a, b) => a - b);
   const completes = real.map((s) => s.snapshot.completeness).sort((a, b) => a - b);
 
@@ -242,7 +253,7 @@ export interface FindingInsight {
 }
 
 export function findingInsight(sessions: PilotSession[]): FindingInsight {
-  const real = sessions.filter((s) => !s.isDemo);
+  const real = sessions.filter(isRealSession);
   const present = new Map<Category, number>();
   const leading = new Map<Category, number>();
 
@@ -294,7 +305,7 @@ export interface AssumptionChallenge {
 export function assumptionChallenges(
   sessions: PilotSession[],
 ): AssumptionChallenge[] {
-  const real = sessions.filter((s) => !s.isDemo);
+  const real = sessions.filter(isRealSession);
   const exposed = real.length;
 
   return EDITABLE_ASSUMPTIONS.map((meta) => {
@@ -366,7 +377,7 @@ export interface ConversionBreakdowns {
 export function conversionBreakdowns(
   sessions: PilotSession[],
 ): ConversionBreakdowns {
-  const real = sessions.filter((s) => !s.isDemo);
+  const real = sessions.filter(isRealSession);
   const coverageBand = (c: number) =>
     c >= 1 ? "100%" : c >= 0.75 ? "75-99%" : c >= 0.5 ? "50-74%" : "<50%";
 
@@ -446,7 +457,7 @@ export function calibration(
   const paired = outcomes
     .map((o) => ({ outcome: o, session: byId.get(o.sessionId) }))
     .filter((p): p is { outcome: DiscoveryOutcome; session: PilotSession } =>
-      Boolean(p.session && !p.session.isDemo),
+      Boolean(p.session && isRealSession(p.session)),
     );
 
   // Only calls that actually happened can tell us whether we were right.

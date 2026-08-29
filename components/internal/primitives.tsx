@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { MODEL_VERSION, PILOT_FREEZE } from "@/lib/engine/version";
 import { formatRatio, isSmallSample, type Ratio } from "@/lib/pilot/analyse";
 
 /**
@@ -22,7 +23,25 @@ export function InternalShell({
     <div className="mx-auto max-w-[1120px] px-5 py-8 sm:px-8 sm:py-12">
       <header className="flex flex-wrap items-start justify-between gap-4 border-b border-rule pb-6">
         <div>
-          <p className="eyebrow">QNTM internal</p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <p className="eyebrow">QNTM internal</p>
+            {/* The pilot collects evidence against exactly one model. Every
+                internal surface says which, so a mid-pilot bump is visible
+                the moment it happens. */}
+            <span
+              className={`rounded-sm border px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.1em] ${
+                PILOT_FREEZE.active && PILOT_FREEZE.version === MODEL_VERSION
+                  ? "border-rule-strong text-ink-faint"
+                  : "border-signal-weak/50 text-signal-weak"
+              }`}
+            >
+              {PILOT_FREEZE.active
+                ? PILOT_FREEZE.version === MODEL_VERSION
+                  ? `model ${MODEL_VERSION} · pilot freeze`
+                  : `model ${MODEL_VERSION} ≠ frozen ${PILOT_FREEZE.version}`
+                : `model ${MODEL_VERSION} · no freeze`}
+            </span>
+          </div>
           <h1 className="display mt-2 text-[1.9rem] leading-tight text-ink">
             {title}
           </h1>
@@ -30,7 +49,9 @@ export function InternalShell({
             {subtitle}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-3">{actions}</div>
+        {/* Not shrink-0: with four nav buttons this row is wider than a phone,
+            and a rigid row pushes the whole page sideways. It wraps instead. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-3">{actions}</div>
       </header>
       {children}
     </div>

@@ -87,6 +87,7 @@ export interface SessionWriteInput {
   attribution: Attribution;
   entryMode: EntryMode;
   isDemo: boolean;
+  isTest: boolean;
   durationMs: number | null;
   firstSeen: string;
   assumptionChanges: AssumptionChange[];
@@ -126,6 +127,8 @@ export function validateSessionWrite(body: unknown): SessionWriteResult {
       attribution: sanitizeAttribution(b.attribution),
       entryMode: b.entryMode === "demo" ? "demo" : "direct",
       isDemo: b.isDemo === true || b.entryMode === "demo",
+      // A forged isTest only removes one record from learning — harmless.
+      isTest: b.isTest === true,
       durationMs,
       firstSeen,
       assumptionChanges: sanitizeAssumptionChanges(b.assumptionChanges),

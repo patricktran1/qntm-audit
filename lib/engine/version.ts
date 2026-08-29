@@ -45,3 +45,34 @@ export const MODEL_VERSION = "1.1.0";
  * unintended change fails a test rather than silently rewriting history.
  */
 export const SHARE_ENCODING_VERSION = 1;
+
+/**
+ * PILOT MODEL FREEZE
+ *
+ * The initial real-world pilot runs against MODEL_VERSION exactly as pinned
+ * here. While `active` is true:
+ *
+ *   - no threshold tuning based on individual anecdotes
+ *   - no detector changes because one prospect disagrees
+ *   - no economic-model changes because a number feels uncomfortable
+ *   - no landing-experiment winner declared
+ *   - no benchmark claims
+ *   - no automatic optimisation of any kind
+ *
+ * A true correctness bug can still be fixed. If that happens: document it in
+ * MODEL_CHANGELOG.md, add regression coverage, decide PATCH / MINOR / MAJOR
+ * under the policy above, and preserve comparability rules. Anything short of
+ * a correctness bug waits for the first-ten review described in
+ * PILOT_RUNBOOK.md.
+ *
+ * Enforced two ways: tests/integrity.test.ts asserts that the frozen version
+ * matches MODEL_VERSION while the freeze is active (so a casual model bump
+ * fails CI until the freeze is deliberately lifted or moved), and every
+ * internal surface displays the freeze so an operator can see at a glance
+ * which model the pilot is collecting evidence against.
+ */
+export const PILOT_FREEZE = {
+  active: true,
+  version: "1.1.0",
+  startedAt: "2026-08-29",
+} as const;

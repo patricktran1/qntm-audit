@@ -46,6 +46,18 @@ page.on("console", (m) => {
   if (m.type() === "error") problems.push(`console: ${m.text()}`);
 });
 
+// QA traffic must never look like real pilot evidence. Marking the browser
+// before the first navigation means every record this script writes carries
+// isTest, is excluded from every learning surface, and is removable in one
+// click from /internal/setup.
+await ctx.addInitScript(() => {
+  try {
+    window.localStorage.setItem("qntm.pilot.test", "1");
+  } catch {
+    // Storage unavailable; the run still exercises the loop.
+  }
+});
+
 // ── 1. Arrive from an attributed outreach link ──────────────────────────────
 await page.goto(
   `${BASE}/?source=leaderm&campaign=conference-followup&cohort=first10`,
@@ -133,6 +145,14 @@ if (!pilotText.includes("leaderm"))
   problems.push("attribution not visible on the pilot dashboard");
 if (!/Completed audits/i.test(pilotText))
   problems.push("pilot health panel missing");
+// This script marks its browser as a test device, so the row must be visible
+// to the operator AND visibly excluded from the learning figures.
+if (!/\btest\b/i.test(pilotText))
+  problems.push("test session is not flagged as test on the dashboard");
+// Any non-zero count: a previous run's records may still be present until
+// the clear-test step at the end.
+if (!/[1-9]\d* test excluded/i.test(pilotText))
+  problems.push("test sessions are not reported as excluded from pilot health");
 
 // ── 6. Record a discovery outcome from the brief ────────────────────────────
 await op.getByRole("link", { name: "Brief" }).first().click();
@@ -151,30 +171,79 @@ await op.locator("#whyBuy").fill("A/R is visibly their problem.");
 await op.getByRole("button", { name: /Record outcome|Update outcome/ }).click();
 await op.waitForSelector("text=Saved.", { timeout: 10_000 });
 
-// ── 7. Calibration must now show the comparison ─────────────────────────────
+// ── 7. Calibration must render, and must NOT count this test session ────────
+// The outcome was really written — section 8 proves it via the full-scope
+// export — but a QA run must never reach a learning surface. Both halves are
+// asserted, because a pass on either alone would hide a real defect: silent
+// write failure, or leaked test data.
 await op.goto(`${BASE}/internal/calibration`, { waitUntil: "domcontentloaded" });
 await op.waitForSelector("text=Calibration");
 const calibText = await op.locator("body").innerText();
 if (!/Outcomes recorded/i.test(calibText)) problems.push("calibration panel missing");
-if (/Outcomes recorded\s*\n?\s*0/i.test(calibText))
-  problems.push("calibration shows no outcomes after one was recorded");
+if (calibText.includes(sessionId.slice(3, 11)))
+  problems.push("a test session reached calibration");
 
-// ── 8. Export must contain the session ──────────────────────────────────────
+// ── 8. Exports: excluded by default, joined and complete in full scope ──────
 const csv = await op.evaluate(async (base) => {
   const res = await fetch(`${base}/internal/api/export?kind=sessions`);
   return res.text();
 }, BASE);
-if (!csv.includes(sessionId)) problems.push("session missing from CSV export");
-if (!csv.includes("leaderm")) problems.push("attribution missing from CSV export");
-if (csv.includes("pilot@example.com"))
-  problems.push("CSV export leaked a contact email");
-if (csv.includes("Dr Pilot")) problems.push("CSV export leaked a contact name");
+if (csv.includes(sessionId))
+  problems.push("test session appeared in the default analytical export");
+
+const allCsv = await op.evaluate(async (base) => {
+  const res = await fetch(`${base}/internal/api/export?kind=sessions&include=all`);
+  return res.text();
+}, BASE);
+if (!allCsv.includes(sessionId))
+  problems.push("session missing from the full-scope CSV export");
+if (!allCsv.includes("leaderm"))
+  problems.push("attribution missing from the full-scope CSV export");
+if (!/,"true","?\r?\n?/.test(allCsv) || !allCsv.includes('"true"'))
+  problems.push("is_test flag not recorded in the export");
+
+const outcomeCsv = await op.evaluate(async (base) => {
+  const res = await fetch(`${base}/internal/api/export?kind=outcomes&include=all`);
+  return res.text();
+}, BASE);
+if (!outcomeCsv.includes(sessionId))
+  problems.push("the recorded outcome never reached storage");
+if (!outcomeCsv.includes("qualified"))
+  problems.push("outcome content missing from the export");
+
+for (const [label, body] of [
+  ["default sessions", csv],
+  ["full sessions", allCsv],
+  ["outcomes", outcomeCsv],
+]) {
+  if (body.includes("pilot@example.com"))
+    problems.push(`${label} export leaked a contact email`);
+  if (body.includes("Dr Pilot"))
+    problems.push(`${label} export leaked a contact name`);
+}
+
+// ── 9. Clearing test records must remove exactly this session ───────────────
+const cleared = await op.evaluate(async (base) => {
+  const res = await fetch(`${base}/internal/api/clear-test`, { method: "POST" });
+  return res.json();
+}, BASE);
+if (!cleared.ok || cleared.deleted < 1)
+  problems.push(`clear-test did not remove the test session: ${JSON.stringify(cleared)}`);
+
+const afterClear = await op.evaluate(async (base) => {
+  const res = await fetch(`${base}/internal/api/export?kind=sessions&include=all`);
+  return res.text();
+}, BASE);
+if (afterClear.includes(sessionId))
+  problems.push("test session survived clear-test");
 
 await browser.close();
 
 console.log(`Session: ${sessionId}`);
 console.log(`Steps: ${step}`);
-console.log(`CSV rows: ${csv.trim().split("\r\n").length - 1}`);
+console.log(`Default-scope CSV rows (test excluded): ${csv.trim().split("\r\n").length - 1}`);
+console.log(`Full-scope CSV rows: ${allCsv.trim().split("\r\n").length - 1}`);
+console.log(`Test records cleared: ${cleared.deleted}`);
 if (problems.length) {
   console.error("\nPROBLEMS:");
   for (const p of problems) console.error("  " + p);

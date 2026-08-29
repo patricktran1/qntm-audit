@@ -19,8 +19,9 @@ npm run dev          # http://localhost:3000
 ```bash
 npm run typecheck    # tsc --noEmit
 npm run lint         # next lint
-npm test             # vitest — 84 tests over the calculation engine
+npm test             # vitest — the engine, the pilot, and workflow integrity
 npm run build        # production build
+npm run pilot:check  # readiness against a running deployment
 ```
 
 ## Layout
@@ -33,11 +34,14 @@ app/
   results/                 the physician-facing report
   demo/                    finished sample reports, for live demonstrations
   talk/                    optional lead capture, reachable only after results
+  internal/setup/          production readiness: config, store, sinks, test data
+  internal/campaigns/      attributed outreach link generator
+  internal/pilot/          operator dashboard: attention queue, cohorts, stop conditions
+  internal/call/           one-screen instrument panel for a discovery call
   internal/brief/          pre-call sales brief + discovery outcome capture
-  internal/pilot/          operator dashboard: what we are learning
   internal/calibration/    predicted pain vs. what discovery calls said
   internal/events/         session event log, for verifying the funnel
-  internal/api/            gated: outcome writes, CSV export
+  internal/api/            gated: outcome writes, exports, test lead, clear test
   api/pilot/               public: session write, CTA mark
   api/events/              analytics sink (no-op unless a webhook is configured)
   api/lead/                lead delivery (accepts and logs when unconfigured)
@@ -53,7 +57,7 @@ lib/
     automation.ts          automation candidates, capped at three
     verdict.ts             the conclusion, and the conversion offer it drives
     thresholds.ts          threshold provenance + the empty benchmark contract
-    version.ts             MODEL_VERSION and the compatibility contract
+    version.ts             MODEL_VERSION, the compatibility contract, PILOT_FREEZE
     fixtures.ts            twelve golden practices and their invariants
     audit.ts               runAudit() — the one entry point
     brief.ts               internal sales brief
@@ -112,12 +116,13 @@ routes accept-and-drop.
 ### Turning the pilot on
 
 The product is fully functional without a pilot store; it simply learns
-nothing, and `/internal/pilot` stays empty and says so. To start collecting:
+nothing, and `/internal/pilot` stays empty and says so.
 
-1. Create an Upstash Redis database (free tier is ample — a 50-practice pilot
-   is a few hundred kilobytes).
-2. Set `PILOT_KV_REST_URL` and `PILOT_KV_REST_TOKEN` from its REST section.
-3. Redeploy. Nothing else changes.
+**[`docs/PILOT_SETUP.md`](docs/PILOT_SETUP.md) is the step-by-step version** —
+token, Upstash database, Vercel variables, lead sink, redeploy, then the
+walkthrough that proves the loop works before real outreach. In short: create
+an Upstash Redis database (free tier is ample), set `PILOT_KV_REST_URL` and
+`PILOT_KV_REST_TOKEN`, redeploy, and check `/internal/setup`.
 
 No SDK is added and no schema is required. Swapping the backend later means
 writing one more implementation of `PilotStore`.
@@ -157,7 +162,8 @@ node scripts/pilot-loop.mjs
 node scripts/e2e-walkthrough.mjs              # variant A, landing → lead
 E2E_VARIANT=B node scripts/e2e-walkthrough.mjs
 node scripts/a11y-check.mjs                   # labels, state, targets, keyboard
-node scripts/visual-qa.mjs ./.visual-qa       # 27 surfaces, desktop + mobile
+node scripts/visual-qa.mjs ./.visual-qa       # 34 surfaces, desktop + mobile
+npm run pilot:check -- --base http://localhost:3210
 ```
 
 `visual-qa.mjs` screenshots both landing variants, the audit flow, all three
@@ -173,6 +179,9 @@ report to confirm no contact details leaked into the shareable link.
 
 ## Further reading
 
+- [`PILOT_RUNBOOK.md`](PILOT_RUNBOOK.md) — how to operate the first cohort
+- [`docs/PILOT_SETUP.md`](docs/PILOT_SETUP.md) — one-time production configuration
+- [`PILOT_OUTREACH.md`](PILOT_OUTREACH.md) — message templates for pilot invitations
 - [`PRODUCT.md`](PRODUCT.md) — who this is for, the promise, the user flow
 - [`MODEL.md`](MODEL.md) — every calculation, curve, and assumption
 - [`SALES.md`](SALES.md) — how QNTM should use the output

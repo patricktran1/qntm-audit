@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { MODEL_VERSION } from "@/lib/engine/version";
 import { pilotStore } from "@/lib/pilot/store";
 import { validateOutcomeWrite } from "@/lib/pilot/validate";
-import { INTERNAL_COOKIE } from "@/middleware";
+import { internalAuthorised } from "@/lib/internal-auth";
 
 /**
  * Records a discovery-call outcome. Operator-only.
@@ -15,22 +15,8 @@ import { INTERNAL_COOKIE } from "@/middleware";
 
 const MAX_BODY_BYTES = 8 * 1024;
 
-function authorised(request: Request): boolean {
-  const token = process.env.INTERNAL_ACCESS_TOKEN;
-  if (!token) return process.env.NODE_ENV !== "production";
-  const cookie = request.headers.get("cookie") ?? "";
-  const match = new RegExp(`(?:^|;\\s*)${INTERNAL_COOKIE}=([^;]+)`).exec(cookie);
-  if (!match?.[1]) return false;
-  const value = decodeURIComponent(match[1]);
-  if (value.length !== token.length) return false;
-  let diff = 0;
-  for (let i = 0; i < value.length; i++)
-    diff |= value.charCodeAt(i) ^ token.charCodeAt(i);
-  return diff === 0;
-}
-
 export async function POST(request: Request) {
-  if (!authorised(request))
+  if (!internalAuthorised(request))
     return NextResponse.json({ ok: false }, { status: 404 });
 
   const raw = await request.text();

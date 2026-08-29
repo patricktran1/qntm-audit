@@ -73,6 +73,14 @@ export interface PilotSession {
   entryMode: EntryMode;
   /** True for a synthetic practice loaded from /demo. Excluded from learning. */
   isDemo: boolean;
+  /**
+   * True for QA traffic: local E2E runs, operator setup checks, readiness
+   * probes. Excluded from every learning surface and from default exports,
+   * and deletable as a group from /internal/setup. Distinct from isDemo —
+   * a demo is a real conversation about a synthetic practice; a test is not
+   * a conversation at all.
+   */
+  isTest: boolean;
   durationMs: number | null;
   snapshot: AuditSnapshot;
   /** Assumption slider movements, appended as they happen. */

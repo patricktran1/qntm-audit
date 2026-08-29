@@ -57,6 +57,7 @@ export async function POST(request: Request) {
     attribution: input.attribution,
     entryMode: input.entryMode,
     isDemo: input.isDemo,
+    isTest: input.isTest,
     durationMs: input.durationMs,
     snapshot: buildSnapshot(result),
     assumptionChanges: input.assumptionChanges,

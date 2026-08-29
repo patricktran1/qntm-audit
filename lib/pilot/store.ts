@@ -29,6 +29,14 @@ export interface StoreResult {
   error?: string;
 }
 
+export interface ProbeResult {
+  ok: boolean;
+  /** Round-trip time for a set → get → delete cycle. */
+  latencyMs?: number;
+  /** Safe to display. Never contains credentials or URLs. */
+  error?: string;
+}
+
 export interface PilotStore {
   readonly kind: "noop" | "redis";
   readonly configured: boolean;
@@ -43,6 +51,20 @@ export interface PilotStore {
   getOutcome(sessionId: string): Promise<DiscoveryOutcome | null>;
   /** Everything, for the operator dashboard and exports. Newest first. */
   readAll(limit?: number): Promise<PilotSummary>;
+  /**
+   * Connectivity, write, read, and delete in one round trip, against a probe
+   * key that never touches pilot data and is removed before returning.
+   */
+  probe(): Promise<ProbeResult>;
+  /**
+   * Deletes every session flagged isTest, and its outcome. Deliberately the
+   * only destructive operation the store exposes: it cannot be pointed at a
+   * real record, because the predicate is the flag, not an id from a caller.
+   */
+  deleteTestRecords(): Promise<{ ok: boolean; deleted: number; error?: string }>;
+  /** Small operational metadata (last lead test, etc). Never pilot data. */
+  putMeta(key: string, value: string): Promise<StoreResult>;
+  getMeta(key: string): Promise<string | null>;
 }
 
 // ── No-op ───────────────────────────────────────────────────────────────────
@@ -66,10 +88,23 @@ class NoopStore implements PilotStore {
   async readAll(): Promise<PilotSummary> {
     return { sessions: [], outcomes: [] };
   }
+  async probe(): Promise<ProbeResult> {
+    return { ok: false, error: "no pilot store configured" };
+  }
+  async deleteTestRecords(): Promise<{ ok: boolean; deleted: number; error?: string }> {
+    return { ok: false, deleted: 0, error: "no pilot store configured" };
+  }
+  async putMeta(): Promise<StoreResult> {
+    return { ok: false, error: "no pilot store configured" };
+  }
+  async getMeta(): Promise<string | null> {
+    return null;
+  }
 }
 
 // ── Upstash Redis over REST ─────────────────────────────────────────────────
 
+const META_HASH = "qntm:setup:meta";
 const SESSION_HASH = "qntm:pilot:sessions";
 const SESSION_INDEX = "qntm:pilot:session_index";
 const OUTCOME_HASH = "qntm:pilot:outcomes";
@@ -154,6 +189,15 @@ class RedisStore implements PilotStore {
     const byKey = new Map(existing.assumptionChanges.map((c) => [c.key, c]));
     for (const c of incoming.assumptionChanges) byKey.set(c.key, c);
 
+    // The frozen result may only change when the answers themselves change.
+    // The assumption-flush path re-sends the same encoded report; if the
+    // model were bumped between completion and flush, recomputing the
+    // snapshot would silently rewrite what the physician was actually shown
+    // — including its modelVersion. Same answers, same snapshot, forever.
+    // A genuinely re-taken audit (different answers) does update, because
+    // the physician saw the new report.
+    const sameAnswers = incoming.report === existing.report;
+
     return {
       ...existing,
       ...incoming,
@@ -161,6 +205,9 @@ class RedisStore implements PilotStore {
       completedAt: existing.completedAt,
       firstSeen: existing.firstSeen,
       durationMs: existing.durationMs ?? incoming.durationMs,
+      snapshot: sameAnswers ? existing.snapshot : incoming.snapshot,
+      // The experiment arm was assigned once; a later write cannot move it.
+      variant: existing.variant ?? incoming.variant,
       // Lifecycle flags are set elsewhere and must survive a session rewrite.
       ctaClickedAt: existing.ctaClickedAt ?? incoming.ctaClickedAt,
       leadSubmittedAt: existing.leadSubmittedAt ?? incoming.leadSubmittedAt,
@@ -168,7 +215,10 @@ class RedisStore implements PilotStore {
       attribution: Object.keys(existing.attribution).length
         ? existing.attribution
         : incoming.attribution,
+      // Demo and test are one-way: once flagged, a record can never quietly
+      // become real pilot evidence.
       isDemo: existing.isDemo || incoming.isDemo,
+      isTest: existing.isTest === true || incoming.isTest === true,
       assumptionChanges: [...byKey.values()],
     };
   }
@@ -240,6 +290,68 @@ class RedisStore implements PilotStore {
       return { sessions, outcomes };
     } catch {
       return { sessions: [], outcomes: [] };
+    }
+  }
+
+  async probe(): Promise<ProbeResult> {
+    // A dedicated key outside the pilot namespace, expiring on its own even
+    // if the DEL is never reached, holding a nonce so a stale value from an
+    // earlier probe cannot fake a passing read.
+    const key = "qntm:setup:probe";
+    const nonce = `probe-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const started = Date.now();
+    try {
+      const results = await this.pipeline([
+        ["SET", key, nonce, "EX", "60"],
+        ["GET", key],
+        ["DEL", key],
+      ]);
+      const latencyMs = Date.now() - started;
+      if (results[1] !== nonce)
+        return { ok: false, latencyMs, error: "read returned a different value than written" };
+      return { ok: true, latencyMs };
+    } catch (e) {
+      return { ok: false, error: safeError(e) };
+    }
+  }
+
+  async deleteTestRecords(): Promise<{ ok: boolean; deleted: number; error?: string }> {
+    try {
+      const { sessions } = await this.readAll();
+      const testIds = sessions
+        .filter((s) => s.isTest === true)
+        .map((s) => s.sessionId);
+      if (testIds.length === 0) return { ok: true, deleted: 0 };
+
+      const commands: string[][] = [];
+      for (const id of testIds) {
+        commands.push(["HDEL", SESSION_HASH, id]);
+        commands.push(["LREM", SESSION_INDEX, "0", id]);
+        commands.push(["HDEL", OUTCOME_HASH, id]);
+        commands.push(["LREM", OUTCOME_INDEX, "0", id]);
+      }
+      await this.pipeline(commands);
+      return { ok: true, deleted: testIds.length };
+    } catch (e) {
+      return { ok: false, deleted: 0, error: safeError(e) };
+    }
+  }
+
+  async putMeta(key: string, value: string): Promise<StoreResult> {
+    try {
+      await this.pipeline([["HSET", META_HASH, key, value.slice(0, 2000)]]);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: safeError(e) };
+    }
+  }
+
+  async getMeta(key: string): Promise<string | null> {
+    try {
+      const [raw] = await this.pipeline([["HGET", META_HASH, key]]);
+      return typeof raw === "string" ? raw : null;
+    } catch {
+      return null;
     }
   }
 }

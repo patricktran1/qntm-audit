@@ -94,6 +94,14 @@ await shoot(`22-pilot-desktop`, `/internal/pilot?key=${INTERNAL_KEY}`, DESKTOP);
 await shoot(`23-pilot-mobile`, `/internal/pilot?key=${INTERNAL_KEY}`, MOBILE);
 await shoot(`24-calibration-desktop`, `/internal/calibration?key=${INTERNAL_KEY}`, DESKTOP);
 await shoot(`13-brief-mobile`, `/internal/brief?a=${REPORTS.group}&key=${INTERNAL_KEY}`, MOBILE);
+await shoot(`26-setup-desktop`, `/internal/setup?key=${INTERNAL_KEY}`, DESKTOP);
+await shoot(`27-setup-mobile`, `/internal/setup?key=${INTERNAL_KEY}`, MOBILE);
+await shoot(`28-campaigns-desktop`, `/internal/campaigns?key=${INTERNAL_KEY}`, DESKTOP);
+await shoot(`29-campaigns-mobile`, `/internal/campaigns?key=${INTERNAL_KEY}`, MOBILE);
+// The call view is built for a phone in hand; mobile is the primary check.
+await shoot(`30-call-mobile`, `/internal/call?a=${REPORTS.group}&key=${INTERNAL_KEY}`, MOBILE);
+await shoot(`31-call-desktop`, `/internal/call?a=${REPORTS.group}&key=${INTERNAL_KEY}`, DESKTOP);
+await shoot(`32-pilot-filtered`, `/internal/pilot?filter=no-lead&key=${INTERNAL_KEY}`, DESKTOP);
 await shoot(`14-talk-desktop`, `/talk?a=${REPORTS.group}`, DESKTOP);
 await shoot(`15-talk-mobile`, `/talk?a=${REPORTS.group}`, MOBILE);
 await shoot(`16-results-badlink`, `/results?a=broken`, DESKTOP);

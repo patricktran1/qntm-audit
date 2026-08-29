@@ -30,12 +30,15 @@ export interface PilotIdentity {
   entryMode: EntryMode;
   /** ISO timestamp of first touch in this browser. */
   firstSeen: string;
+  /** True when this browser has been marked as a QA / test device. */
+  isTest: boolean;
 }
 
 const SESSION_KEY = "qntm.pilot.session";
 const ATTRIBUTION_KEY = "qntm.pilot.attribution";
 const ENTRY_KEY = "qntm.pilot.entry";
 const FIRST_SEEN_KEY = "qntm.pilot.firstSeen";
+const TEST_KEY = "qntm.pilot.test";
 
 /**
  * Sanitises one attribution value.
@@ -172,7 +175,34 @@ export function pilotIdentity(): PilotIdentity {
     attribution,
     entryMode: entry === "demo" ? "demo" : "direct",
     firstSeen: read(FIRST_SEEN_KEY) ?? new Date().toISOString(),
+    isTest: read(TEST_KEY) === "1",
   };
+}
+
+// ── Test-device marking ─────────────────────────────────────────────────────
+// A browser used for QA — a readiness walkthrough, an E2E run, an operator
+// poking at production — marks itself once, and everything it records carries
+// isTest. The flag can only remove data from learning, never add to it, so a
+// visitor setting it maliciously costs us one record and nothing else.
+
+/** True when this browser is marked as a QA / test device. */
+export function isTestDevice(): boolean {
+  return read(TEST_KEY) === "1";
+}
+
+/** Marks this browser as a QA / test device. Survives demo resets. */
+export function markTestDevice(): void {
+  write(TEST_KEY, "1");
+}
+
+/** Removes the test-device mark. */
+export function unmarkTestDevice(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(TEST_KEY);
+  } catch {
+    // Nothing to do.
+  }
 }
 
 /** Clears pilot identity. Used by the demo reset so a booth device stays clean. */

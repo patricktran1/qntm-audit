@@ -86,8 +86,9 @@ export function OutcomeForm({
 
   return (
     <form
+      id="outcome"
       onSubmit={submit}
-      className="rounded-lg border border-accent/30 bg-accent-soft/30 p-6"
+      className="rounded-lg border border-accent/30 bg-accent-soft/30 p-6 scroll-mt-6"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <p className="text-[13px] font-semibold uppercase tracking-[0.12em] text-accent-ink">

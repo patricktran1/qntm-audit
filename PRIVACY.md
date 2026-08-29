@@ -42,7 +42,8 @@ random and encodes nothing about the visitor.
 
 One `PilotSession` per completed audit:
 
-- Session id, timestamps, experiment variant, attribution, entry mode
+- Session id, timestamps, experiment variant, attribution, entry mode, and
+  whether the record is demo or QA traffic
 - The **banded** practice shape: provider band, collections band, score,
   coverage, completeness, verdict, opportunity band
 - Which findings fired, which categories, which dimensions were unscored,
@@ -53,6 +54,9 @@ One `PilotSession` per completed audit:
 
 One `DiscoveryOutcome` per recorded conversation: controlled enum values plus
 three bounded operator notes.
+
+One small operational metadata entry (`qntm:setup:meta`) recording whether the
+last lead-delivery test succeeded. No practice data, no contact details.
 
 ### When a lead sink is configured
 
@@ -97,6 +101,11 @@ When the pilot ends, the dataset should be either deleted or reduced to the
 anonymous analytical export — which is the same file `/internal/api/export`
 produces by default.
 
+A full-fidelity JSON backup (`?kind=backup`) is intended for operational
+recovery during the pilot, not for retention afterwards. It carries everything
+the store holds, including the encoded answers, so it is treated as store-grade
+data wherever it is kept.
+
 ## How to delete it
 
 **Everything:** delete the Upstash database, or from its console:
@@ -108,6 +117,10 @@ DEL qntm:pilot:outcomes qntm:pilot:outcome_index
 
 Removing `PILOT_KV_REST_URL` and `PILOT_KV_REST_TOKEN` returns the product to
 no-op persistence immediately; the audit is unaffected.
+
+**QA records only:** `/internal/setup` → **Clear test records**. Scoped by the
+stored `isTest` flag rather than by any id supplied to it, so it cannot reach a
+real record. This is deliberately the only destructive action in the UI.
 
 **One practice:** session ids are visible on `/internal/pilot`. Delete both the
 session and its outcome:
@@ -132,6 +145,13 @@ Not policy — tests.
 
 | Property | Where |
 | --- | --- |
+| First-touch attribution cannot be overwritten | `tests/workflow.test.ts` |
+| Demo and QA records can never become real pilot data | `tests/workflow.test.ts` |
+| A stored result cannot change retroactively | `tests/workflow.test.ts` |
+| Test-record deletion cannot touch a real record | `tests/workflow.test.ts` |
+| Storage failure is never reported as success | `tests/workflow.test.ts` |
+| The store probe leaks no URL or token | `tests/workflow.test.ts` |
+| Exports reconcile with dashboard counts | `tests/workflow.test.ts` |
 | Analytics carry bands, never raw collections | `tests/security.test.ts` |
 | No event key is identifier-shaped | `tests/security.test.ts` |
 | Snapshots band every practice figure | `tests/security.test.ts` |

@@ -53,7 +53,7 @@ export function pilotGuidance(
       id: "sample-too-small",
       severity: "blocking",
       headline: "Too few completed audits to conclude anything",
-      evidence: `${n} completed audit${n === 1 ? "" : "s"} (excluding demos). Nothing below this line should change the model until there are at least ${SMALL_SAMPLE}.`,
+      evidence: `${n} completed audit${n === 1 ? "" : "s"} (excluding demo and test traffic). Nothing below this line should change the model until there are at least ${SMALL_SAMPLE}.`,
       action:
         "Run outreach. Treat every panel on this page as descriptive until the denominator is real.",
     });

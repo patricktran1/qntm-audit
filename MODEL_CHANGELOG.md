@@ -8,6 +8,45 @@ history covers those.
 reconstructed from git history say so, and claim no motivation the repository
 does not support.
 
+---
+
+## PILOT MODEL FREEZE — ACTIVE
+
+**The initial real-world pilot runs against `1.1.0`, frozen 2026-08-29.**
+Declared in `lib/engine/version.ts` as `PILOT_FREEZE` and asserted by
+`tests/integrity.test.ts`, so bumping `MODEL_VERSION` without deliberately
+lifting the freeze fails the suite.
+
+While the freeze is active:
+
+- **No threshold tuning based on individual anecdotes.** One dermatologist
+  disagreeing is a calibration data point, not a defect report.
+- **No detector changes because one prospect disagrees.** Record the
+  disagreement in the discovery outcome; the first-ten review decides.
+- **No economic-model changes because a number feels uncomfortable.** If a
+  range reads high on a call, capture `economic reaction: too high` and move
+  on.
+- **No landing-experiment winner declared.** The A/B arms both keep running;
+  at pilot sample sizes any difference is noise.
+- **No benchmark claims.** The benchmark layer stays empty until there is
+  defensible data to put in it.
+- **No automatic optimisation.** Nothing tunes itself against outcomes.
+
+**A true correctness bug can still be fixed.** The procedure:
+
+1. Document the bug and its evidence here, as its own entry.
+2. Add regression coverage first — the failing test is the proof.
+3. Decide PATCH / MINOR / MAJOR under the policy below.
+4. Preserve comparability: stored sessions keep the version that produced
+   them, and calibration segments by it, so a mid-pilot fix never silently
+   rewrites earlier evidence.
+
+The freeze lifts at the first-ten review (`PILOT_RUNBOOK.md`, "After the
+first ten"), when the calibration data — not an anecdote — decides whether
+the next version is a PATCH, MINOR, MAJOR, or nothing.
+
+---
+
 Versioning policy is defined in `lib/engine/version.ts`:
 
 - **MAJOR** — the meaning of a result changes. Results are not comparable

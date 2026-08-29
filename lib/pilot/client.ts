@@ -71,6 +71,7 @@ export async function recordCompletedAudit(
     attribution: identity.attribution,
     entryMode: input.isDemo ? "demo" : identity.entryMode,
     isDemo: input.isDemo || identity.entryMode === "demo",
+    isTest: identity.isTest,
     durationMs: input.durationMs,
     firstSeen: identity.firstSeen,
     assumptionChanges: readAssumptionChanges(),
@@ -94,6 +95,7 @@ export async function flushAssumptionChanges(report: string): Promise<void> {
     attribution: identity.attribution,
     entryMode: identity.entryMode,
     isDemo: identity.entryMode === "demo",
+    isTest: identity.isTest,
     durationMs: null,
     firstSeen: identity.firstSeen,
     assumptionChanges: changes,
@@ -105,11 +107,13 @@ export function leadIdentity(): {
   sessionId: string;
   attribution: Attribution;
   entryMode: string;
+  isTest: boolean;
 } {
   const identity = pilotIdentity();
   return {
     sessionId: identity.sessionId,
     attribution: identity.attribution,
     entryMode: identity.entryMode,
+    isTest: identity.isTest,
   };
 }

@@ -85,6 +85,7 @@ export function validateLead(body: unknown): ValidationResult {
       sessionId: isSessionId(b.sessionId) ? b.sessionId : newSessionId(),
       attribution: sanitizeAttribution(b.attribution) as Record<string, string>,
       entryMode: b.entryMode === "demo" ? "demo" : "direct",
+      isTest: b.isTest === true,
     },
   };
 }

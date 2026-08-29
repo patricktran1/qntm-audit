@@ -69,7 +69,7 @@ function slackText(lead: LeadRecord): string {
     .join(" ");
 
   return [
-    `*New practice audit lead* — ${lead.practiceName || "practice not given"}`,
+    `${lead.isTest ? "[TEST — QA device, not a real lead] " : ""}*New practice audit lead* — ${lead.practiceName || "practice not given"}`,
     `${lead.name || "name not given"} · ${lead.role.replace(/_/g, " ")} · ${lead.email}`,
     lead.location || null,
     attribution ? `Source: ${attribution}` : "Source: none recorded",

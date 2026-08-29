@@ -18,6 +18,8 @@ export interface LeadInput {
   /** Sanitised campaign attribution, carried from first touch. */
   attribution: Record<string, string>;
   entryMode: string;
+  /** True when the submitting browser is marked as a QA / test device. */
+  isTest: boolean;
 }
 
 export type LeadRole =

@@ -10,6 +10,7 @@ import { createServer } from "node:http";
 const port = Number(process.argv[2] ?? 3311);
 const hashes = new Map();
 const lists = new Map();
+const strings = new Map();
 
 const H = (k) => hashes.get(k) ?? hashes.set(k, new Map()).get(k);
 const L = (k) => lists.get(k) ?? lists.set(k, []).get(k);
@@ -50,6 +51,24 @@ function run([cmd, ...args]) {
       const [key, start, stop] = args;
       const end = Number(stop);
       return L(key).slice(Number(start), end === -1 ? undefined : end + 1);
+    }
+    case "LLEN": {
+      return L(args[0]).length;
+    }
+    case "HDEL": {
+      const [key, field] = args;
+      return H(key).delete(field) ? 1 : 0;
+    }
+    case "SET": {
+      const [key, value] = args;
+      strings.set(key, value);
+      return "OK";
+    }
+    case "GET": {
+      return strings.get(args[0]) ?? null;
+    }
+    case "DEL": {
+      return strings.delete(args[0]) ? 1 : 0;
     }
     default:
       throw new Error(`unsupported: ${c}`);

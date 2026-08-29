@@ -9,7 +9,9 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "pilot:check": "node scripts/pilot-readiness.mjs",
+    "pilot:restore": "node scripts/pilot-restore.mjs"
   },
   "dependencies": {
     "next": "^15.5.24",

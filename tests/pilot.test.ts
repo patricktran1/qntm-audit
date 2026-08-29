@@ -45,6 +45,7 @@ function sessionFrom(
     attribution: { source: "leaderm", campaign: "pilot" },
     entryMode: "direct",
     isDemo: false,
+    isTest: false,
     durationMs: 240_000,
     snapshot: buildSnapshot(result),
     assumptionChanges: [],

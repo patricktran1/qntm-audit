@@ -126,6 +126,9 @@ await audit("demo", "/demo");
 const KEY = process.env.INTERNAL_ACCESS_TOKEN ?? "test-token-abc123";
 await audit("pilot", `/internal/pilot?key=${KEY}`);
 await audit("calibration", `/internal/calibration?key=${KEY}`);
+await audit("setup", `/internal/setup?key=${KEY}`);
+await audit("campaigns", `/internal/campaigns?key=${KEY}`);
+await audit("call", `/internal/call?a=${REPORT}&key=${KEY}`);
 
 await browser.close();
 

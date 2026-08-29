@@ -1,6 +1,8 @@
+import { MODEL_VERSION } from "@/lib/engine/version";
+import { isRealSession } from "@/lib/pilot/analyse";
 import { outcomesCsv, sessionsCsv } from "@/lib/pilot/export";
 import { pilotStore } from "@/lib/pilot/store";
-import { INTERNAL_COOKIE } from "@/middleware";
+import { internalAuthorised } from "@/lib/internal-auth";
 
 /**
  * Protected pilot export. Requires the internal cookie — the middleware gate
@@ -13,36 +15,66 @@ import { INTERNAL_COOKIE } from "@/middleware";
 
 export const dynamic = "force-dynamic";
 
-function authorised(request: Request): boolean {
-  const token = process.env.INTERNAL_ACCESS_TOKEN;
-  if (!token) return process.env.NODE_ENV !== "production";
-  const cookie = request.headers.get("cookie") ?? "";
-  const match = new RegExp(`(?:^|;\\s*)${INTERNAL_COOKIE}=([^;]+)`).exec(cookie);
-  if (!match?.[1]) return false;
-  const value = decodeURIComponent(match[1]);
-  if (value.length !== token.length) return false;
-  let diff = 0;
-  for (let i = 0; i < value.length; i++)
-    diff |= value.charCodeAt(i) ^ token.charCodeAt(i);
-  return diff === 0;
-}
-
 export async function GET(request: Request) {
-  if (!authorised(request)) return new Response(null, { status: 404 });
+  if (!internalAuthorised(request)) return new Response(null, { status: 404 });
 
   const url = new URL(request.url);
-  const kind = url.searchParams.get("kind") === "outcomes" ? "outcomes" : "sessions";
+  const kindParam = url.searchParams.get("kind");
+  const kind =
+    kindParam === "outcomes" ? "outcomes" : kindParam === "backup" ? "backup" : "sessions";
   const includeNotes = url.searchParams.get("notes") === "1";
   // The encoded report carries raw practice figures, so it is opt-in.
   const includeReport = url.searchParams.get("full") === "1";
+  // Analytical exports default to real pilot data only. Demo and QA traffic
+  // come along only when explicitly asked for.
+  const includeAll = url.searchParams.get("include") === "all";
 
-  const { sessions, outcomes } = await pilotStore().readAll();
+  const all = await pilotStore().readAll();
+  const stamp = new Date().toISOString().slice(0, 10);
+
+  // The backup is not an analytical export: it is the complete dataset, full
+  // fidelity, every flag intact, so a restore reproduces the store exactly.
+  if (kind === "backup") {
+    const body = JSON.stringify(
+      {
+        format: "qntm-pilot-backup",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        modelVersion: MODEL_VERSION,
+        sessions: all.sessions,
+        outcomes: all.outcomes,
+      },
+      null,
+      2,
+    );
+    return new Response(body, {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "content-disposition": `attachment; filename="qntm-pilot-backup-${stamp}.json"`,
+        "cache-control": "no-store, max-age=0",
+        "x-robots-tag": "noindex, nofollow, noarchive",
+      },
+    });
+  }
+
+  const sessions = includeAll ? all.sessions : all.sessions.filter(isRealSession);
+  const realIds = new Set(sessions.map((s) => s.sessionId));
+  // An outcome follows its session's scope. Orphan outcomes (no stored
+  // session) stay in: they are operator-authored calibration data and the
+  // data-quality queue flags them separately.
+  const outcomes = includeAll
+    ? all.outcomes
+    : all.outcomes.filter(
+        (o) =>
+          realIds.has(o.sessionId) ||
+          !all.sessions.some((s) => s.sessionId === o.sessionId),
+      );
+
   const body =
     kind === "outcomes"
       ? outcomesCsv(outcomes, sessions, includeNotes)
       : sessionsCsv(sessions, includeReport);
 
-  const stamp = new Date().toISOString().slice(0, 10);
   return new Response(body, {
     headers: {
       "content-type": "text/csv; charset=utf-8",
