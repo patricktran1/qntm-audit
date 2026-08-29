@@ -14,6 +14,25 @@ import type { AuditResult, Finding } from "./types";
 
 export type FitLevel = "strong" | "possible" | "weak";
 
+/**
+ * Maps the leading finding to the service that actually addresses it, so the
+ * suggested opening and the suggested first scope are about the same problem.
+ */
+const SCOPE_FOR_FINDING_PRE: Record<string, string> = {
+  "phone-capacity": "AI phone agent / inbound triage",
+  "front-office-ratio": "Virtual staffing / offshore front office",
+  "prior-auth-load": "Workflow automation (prior auth, intake, recalls)",
+  "no-show-leakage": "Workflow automation (prior auth, intake, recalls)",
+  "access-delay": "Workflow automation (prior auth, intake, recalls)",
+  "ar-aging": "Revenue cycle optimization",
+  "billing-cost": "Revenue cycle optimization",
+  "visit-yield": "Revenue cycle optimization",
+  "physician-admin-load": "Documentation / physician time recovery",
+  "after-hours-load": "Documentation / physician time recovery",
+  "software-stack": "EHR / technology stack review",
+  "overhead-load": "Virtual staffing / offshore front office",
+};
+
 export interface ServiceFit {
   service: string;
   fit: FitLevel;
@@ -35,18 +54,27 @@ export interface OpportunityBrief {
   dataQuality: string;
 }
 
-function sizeBand(physicians: number | null, collections: number | null): string {
+function sizeBand(physicians: number | null): string {
   if (physicians === null) return "Unknown size";
-  const label =
-    physicians <= 1
-      ? "Solo"
-      : physicians <= 3
-        ? "Small group (2–3 physicians)"
-        : physicians <= 8
-          ? "Mid group (4–8 physicians)"
-          : "Large group (9+ physicians)";
-  return collections === null ? label : `${label} · ${currencyExact(collections)} collections`;
+  if (physicians <= 1) return "Solo";
+  if (physicians <= 3) return "Small group (2–3 physicians)";
+  if (physicians <= 8) return "Mid group (4–8 physicians)";
+  return "Large group (9+ physicians)";
 }
+
+/**
+ * A brief where every service is a strong fit is a brochure. At most three
+ * services may be rated strong; the rest are demoted to "possible" in order of
+ * how well their evidence actually holds up.
+ */
+const MAX_STRONG_FITS = 3;
+
+/**
+ * Services that can never be the lead offer, whatever the numbers say. A stack
+ * review is a door-opener; rating it "strong" trains the salesperson to lead
+ * with the smallest engagement in the catalogue.
+ */
+const NEVER_LEAD = new Set(["EHR / technology stack review"]);
 
 export function buildBrief(result: AuditResult): OpportunityBrief {
   const { answers: a, assumptions: k, findings, score } = result;
@@ -141,24 +169,21 @@ export function buildBrief(result: AuditResult): OpportunityBrief {
     ? top.evidence.slice(0, 4).map((e) => `${e.label}: ${e.value}`)
     : ["No dominant finding — the practice looks reasonably tight on the dimensions we measured."];
 
+  // Order candidates by how directly the leading finding implicates them, then
+  // cap the number that may be called strong.
+  const alignedFirst = (name: string) =>
+    top && SCOPE_FOR_FINDING_PRE[top.id] === name ? 0 : 1;
+  const strongCandidates = serviceFit
+    .filter((s) => s.fit === "strong")
+    .sort((x, y) => alignedFirst(x.service) - alignedFirst(y.service));
+
+  strongCandidates.forEach((s, i) => {
+    if (NEVER_LEAD.has(s.service) || i >= MAX_STRONG_FITS) s.fit = "possible";
+  });
+
   const strongFits = serviceFit.filter((s) => s.fit === "strong");
 
-  // Map the leading finding to the service that actually addresses it, so the
-  // suggested opening and the suggested scope are about the same problem.
-  const SCOPE_FOR_FINDING: Record<string, string> = {
-    "phone-capacity": "AI phone agent / inbound triage",
-    "front-office-ratio": "Virtual staffing / offshore front office",
-    "prior-auth-load": "Workflow automation (prior auth, intake, recalls)",
-    "no-show-leakage": "Workflow automation (prior auth, intake, recalls)",
-    "access-delay": "Workflow automation (prior auth, intake, recalls)",
-    "ar-aging": "Revenue cycle optimization",
-    "billing-cost": "Revenue cycle optimization",
-    "visit-yield": "Revenue cycle optimization",
-    "physician-admin-load": "Documentation / physician time recovery",
-    "after-hours-load": "Documentation / physician time recovery",
-    "software-stack": "EHR / technology stack review",
-    "overhead-load": "Virtual staffing / offshore front office",
-  };
+  const SCOPE_FOR_FINDING = SCOPE_FOR_FINDING_PRE;
   const alignedName = top ? SCOPE_FOR_FINDING[top.id] : undefined;
   const aligned = alignedName
     ? serviceFit.find((s) => s.service === alignedName && s.fit !== "weak")
@@ -194,14 +219,14 @@ export function buildBrief(result: AuditResult): OpportunityBrief {
     disqualifiers.push("None identified from the audit inputs.");
 
   return {
-    practiceProfile: `${num(a.physicians, 1)} physicians, ${num(a.apps, 1)} APPs, ${num(
+    practiceProfile: `${num(a.physicians, 1)} physicians, ${num(a.apps, 1)} PA/NPs, ${num(
       a.frontOfficeFte,
       1,
     )} front office, ${num(a.clinicalStaffFte, 1)} clinical support. ${num(
       a.clinicalDaysPerWeek,
       1,
     )} clinic days/week at ${num(a.patientsPerProviderPerDay)} patients per provider per day.`,
-    sizeBand: sizeBand(a.physicians, a.annualCollections),
+    sizeBand: sizeBand(a.physicians),
     estimatedAnnualCollections: currencyExact(a.annualCollections),
     highestPain: top ? top.title : "No dominant pain identified",
     painEvidence,

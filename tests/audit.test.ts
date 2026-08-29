@@ -307,6 +307,28 @@ describe("buildBrief", () => {
     expect(idx).toEqual([...idx].sort((a, b2) => a - b2));
   });
 
+  it("never rates more than three services a strong fit", () => {
+    // A brief where everything is strong tells the salesperson nothing.
+    for (const profile of DEMO_PROFILES) {
+      const b = buildBrief(runAudit(profile.answers));
+      expect(b.serviceFit.filter((s) => s.fit === "strong").length).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it("never makes a stack review the lead offer", () => {
+    for (const profile of DEMO_PROFILES) {
+      const b = buildBrief(runAudit(profile.answers));
+      const tech = b.serviceFit.find((s) => s.service.includes("technology stack"));
+      expect(tech?.fit).not.toBe("strong");
+    }
+  });
+
+  it("aligns the suggested first scope with the leading finding", () => {
+    // The opening line and the suggested scope must be about the same problem.
+    const b = buildBrief(runAudit(DEMO_PROFILES[1]!.answers));
+    expect(b.recommendedConversation).toContain("revenue cycle optimization");
+  });
+
   it("flags a thin audit as a disqualifier instead of overselling it", () => {
     const b = buildBrief(
       runAudit({
