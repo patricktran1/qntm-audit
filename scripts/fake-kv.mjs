@@ -27,6 +27,12 @@ function run([cmd, ...args]) {
       const [key, field] = args;
       return H(key).get(field) ?? null;
     }
+    case "HSETNX": {
+      const [key, field, value] = args;
+      if (H(key).has(field)) return 0;
+      H(key).set(field, value);
+      return 1;
+    }
     case "HMGET": {
       const [key, ...fields] = args;
       return fields.map((f) => H(key).get(f) ?? null);

@@ -59,7 +59,7 @@ At least one sink, so a physician asking to talk reaches you within minutes:
   your own service) into `LEAD_WEBHOOK_URL`. The payload is the full lead
   record; treat the receiving end as confidential.
 
-Optional analytics: `NEXT_PUBLIC_ANALYTICS_ENABLED=1` and
+Optional analytics: `NEXT_PUBLIC_ANALYTICS_ENABLED=true` and
 `ANALYTICS_WEBHOOK_URL=…`. The pilot's learning loop does not depend on
 either.
 
@@ -119,8 +119,14 @@ the token opens the gate — the value is never printed.)
 ## 10. Record one test discovery outcome
 
 From the session's brief, fill in the **After the call** form with anything
-and save. Confirm it appears on `/internal/calibration` and that the session
-shows **Outcome recorded** on the dashboard.
+and save. Confirm the session shows **Outcome recorded** on `/internal/pilot`
+and that `/internal/setup` counts it in the store line.
+
+`/internal/calibration` will still read zero, and that is the point: test
+records are excluded from every learning surface by design. An empty
+calibration page here is proof the isolation works, not a failure. Do not
+unmark the test device to make it appear — that writes QA traffic into the
+real dataset.
 
 ## 11. Delete the test records
 

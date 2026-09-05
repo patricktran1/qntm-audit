@@ -37,7 +37,14 @@ export interface ReadinessReport {
   internalAccess: Check;
   store: Check[];
   storeProbe: ProbeResult | null;
-  counts: { sessions: number; outcomes: number; demo: number; test: number } | null;
+  counts: {
+    sessions: number;
+    outcomes: number;
+    demo: number;
+    test: number;
+    /** Exactly what "Clear test records" would delete. */
+    deletable: number;
+  } | null;
   leadSinks: Check[];
   lastLeadTest: LastLeadTest | null;
   analytics: Check[];
@@ -120,8 +127,13 @@ export async function readinessReport(requestHost: string | null): Promise<Readi
     counts = {
       sessions: sessions.length,
       outcomes: outcomes.length,
-      demo: sessions.filter((s) => s.isDemo).length,
-      test: sessions.filter((s) => !s.isDemo && s.isTest === true).length,
+      // An exclusive partition for display: demo-only, then test (which may
+      // also be demo — a marked QA browser visiting /demo produces both).
+      demo: sessions.filter((s) => s.isDemo && s.isTest !== true).length,
+      test: sessions.filter((s) => s.isTest === true).length,
+      // Same predicate deleteTestRecords uses, so the number in the
+      // confirmation is the number destroyed.
+      deletable: sessions.filter((s) => s.isTest === true).length,
     };
 
     const rawTest = await store.getMeta("lead_test");
@@ -164,7 +176,10 @@ export async function readinessReport(requestHost: string | null): Promise<Readi
   }
 
   // ── Analytics ─────────────────────────────────────────────────────────────
-  const analyticsEnabled = process.env.NEXT_PUBLIC_ANALYTICS_ENABLED === "1";
+  // Must match lib/analytics.ts, which is the only consumer. It compares
+  // against "true"; reporting on "1" let this page state that telemetry was
+  // local while events were being relayed to an external sink.
+  const analyticsEnabled = process.env.NEXT_PUBLIC_ANALYTICS_ENABLED === "true";
   const analyticsSink = Boolean(process.env.ANALYTICS_WEBHOOK_URL);
   const analytics: Check[] = [
     {

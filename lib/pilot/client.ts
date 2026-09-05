@@ -15,26 +15,68 @@ import type { AssumptionChange } from "./types";
 
 const PENDING_ASSUMPTIONS = "qntm.pilot.assumptions";
 
-/** Assumption movements collected while reading the report, for the next write. */
-export function rememberAssumptionChange(change: AssumptionChange): void {
+/**
+ * Pending movements are scoped to the report they were made on.
+ *
+ * Share links are a feature, so the report on screen is not necessarily this
+ * visitor's own. Without the scope, one slider nudge left a list in
+ * localStorage forever, and every later report exit — including a colleague's
+ * shared link — posted it under this browser's durable session id.
+ */
+interface PendingAssumptions {
+  report: string;
+  changes: AssumptionChange[];
+}
+
+function readPending(): PendingAssumptions | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PENDING_ASSUMPTIONS);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PendingAssumptions>;
+    if (typeof parsed?.report !== "string" || !Array.isArray(parsed.changes))
+      return null;
+    return { report: parsed.report, changes: parsed.changes };
+  } catch {
+    return null;
+  }
+}
+
+/** Assumption movements collected while reading one report, for the next write. */
+export function rememberAssumptionChange(
+  report: string,
+  change: AssumptionChange,
+): void {
   if (typeof window === "undefined") return;
   try {
-    const existing = readAssumptionChanges();
+    const existing = readPending();
+    // A different report is a different practice: start over rather than
+    // carrying one reader's movements onto another's record.
+    const base = existing && existing.report === report ? existing.changes : [];
     // Keep the latest movement per assumption rather than every drag frame.
-    const next = [...existing.filter((c) => c.key !== change.key), change];
-    window.localStorage.setItem(PENDING_ASSUMPTIONS, JSON.stringify(next.slice(-40)));
+    const next = [...base.filter((c) => c.key !== change.key), change];
+    window.localStorage.setItem(
+      PENDING_ASSUMPTIONS,
+      JSON.stringify({ report, changes: next.slice(-40) } satisfies PendingAssumptions),
+    );
   } catch {
     // Storage unavailable. The audit is unaffected.
   }
 }
 
-export function readAssumptionChanges(): AssumptionChange[] {
-  if (typeof window === "undefined") return [];
+/** Movements pending for this exact report. Empty for any other report. */
+export function readAssumptionChanges(report: string): AssumptionChange[] {
+  const pending = readPending();
+  return pending && pending.report === report ? pending.changes : [];
+}
+
+/** Drops the pending list. Used on a successful flush and on a demo reset. */
+export function clearAssumptionChanges(): void {
+  if (typeof window === "undefined") return;
   try {
-    const raw = window.localStorage.getItem(PENDING_ASSUMPTIONS);
-    return raw ? (JSON.parse(raw) as AssumptionChange[]) : [];
+    window.localStorage.removeItem(PENDING_ASSUMPTIONS);
   } catch {
-    return [];
+    // Nothing to do.
   }
 }
 
@@ -74,7 +116,7 @@ export async function recordCompletedAudit(
     isTest: identity.isTest,
     durationMs: input.durationMs,
     firstSeen: identity.firstSeen,
-    assumptionChanges: readAssumptionChanges(),
+    assumptionChanges: readAssumptionChanges(input.report),
   });
 }
 
@@ -85,21 +127,23 @@ export async function recordCompletedAudit(
  */
 export async function flushAssumptionChanges(report: string): Promise<void> {
   if (typeof window === "undefined") return;
-  const changes = readAssumptionChanges();
+  const changes = readAssumptionChanges(report);
   if (changes.length === 0) return;
   const identity = pilotIdentity();
-  await post("/api/pilot/session", {
+  // kind: "flush" is declared, not inferred. The server routes it to an
+  // update-only append that can never create a session or replace a stored
+  // result — so opening someone else's shared report cannot mint a phantom
+  // completed audit, and cannot overwrite this browser's own frozen snapshot.
+  const ok = await post("/api/pilot/session", {
+    kind: "flush",
     sessionId: identity.sessionId,
     report,
-    variant: currentVariant(),
-    attribution: identity.attribution,
-    entryMode: identity.entryMode,
-    isDemo: identity.entryMode === "demo",
-    isTest: identity.isTest,
-    durationMs: null,
-    firstSeen: identity.firstSeen,
     assumptionChanges: changes,
   });
+  // Only drop them once the server has them. This runs on pagehide with
+  // keepalive, where delivery is not guaranteed, so a failed post keeps the
+  // movements for the next exit rather than losing them.
+  if (ok) clearAssumptionChanges();
 }
 
 /** The identity fields a lead submission carries. */

@@ -70,7 +70,7 @@ export function ClearTestButton({ testCount }: { testCount: number }) {
     // Scoped by construction to isTest records, but still destructive —
     // confirm with the actual count so the operator knows what goes.
     const confirmed = window.confirm(
-      `Delete ${testCount} test session${testCount === 1 ? "" : "s"} and any outcomes recorded against them? Real pilot and demo records are not touched.`,
+      `Delete ${testCount} test session${testCount === 1 ? "" : "s"} and any outcomes recorded against them? Real pilot records are not touched. A demo session recorded on a test device counts as test and is included.`,
     );
     if (!confirmed) return;
     setState("working");

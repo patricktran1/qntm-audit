@@ -24,6 +24,18 @@ const base = (baseArg >= 0 ? args[baseArg + 1] : "http://localhost:3000")?.repla
 const wantTestLead = args.includes("--test-lead");
 const token = process.env.INTERNAL_ACCESS_TOKEN;
 
+// The gate is intentionally open on a local dev server with no token. Decide
+// that from the resolved hostname, not the spelling of the URL — 127.0.0.1
+// reaches the same server as localhost and used to fail every check.
+const isLoopback = (() => {
+  try {
+    const h = new URL(base).hostname;
+    return h === "localhost" || h === "127.0.0.1" || h === "::1";
+  } catch {
+    return false;
+  }
+})();
+
 let failures = 0;
 const ok = (name, detail = "") => console.log(`  ✓ ${name}${detail ? ` — ${detail}` : ""}`);
 const warn = (name, detail = "") => console.log(`  ~ ${name}${detail ? ` — ${detail}` : ""}`);
@@ -102,7 +114,7 @@ for (const path of [
     if (res.status === 404 && robotsHeader.includes("noindex"))
       ok(`${path} → 404 + noindex`);
     else if (res.status === 404) warn(`${path} → 404`, "but no x-robots-tag");
-    else if (res.status === 200 && base.startsWith("http://localhost"))
+    else if (res.status === 200 && isLoopback && !token)
       warn(`${path} open`, "expected in development with no token");
     else bad(`${path}`, `status ${res.status} — must fail closed`);
   } catch (e) {

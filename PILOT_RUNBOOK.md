@@ -20,7 +20,9 @@ Work through `docs/PILOT_SETUP.md` once, in order. In short:
 3. Press **Send test lead notification**; see `[TEST]` arrive in the channel.
 4. Mark your browser as a test device, run one complete audit end to end —
    assumption change, CTA, lead, brief, discovery outcome — and watch it move
-   through `/internal/pilot` and `/internal/calibration`.
+   through `/internal/pilot`. `/internal/calibration` stays empty throughout:
+   QA traffic never reaches a learning surface, which is exactly what you are
+   checking.
 5. Press **Clear test records**. Confirm the dashboard reads zero.
 6. Confirm the internal header badge reads `model 1.1.0 · pilot freeze`.
 

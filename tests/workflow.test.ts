@@ -41,6 +41,14 @@ class FakeRedis {
         const [key, field] = args as [string, string];
         return this.hashes.get(key)?.get(field) ?? null;
       }
+      case "HSETNX": {
+        const [key, field, value] = args as [string, string, string];
+        if (!this.hashes.has(key)) this.hashes.set(key, new Map());
+        const h = this.hashes.get(key)!;
+        if (h.has(field)) return 0;
+        h.set(field, value);
+        return 1;
+      }
       case "HDEL": {
         const [key, field] = args as [string, string];
         return this.hashes.get(key)?.delete(field) ? 1 : 0;
@@ -548,5 +556,132 @@ describe("exports reconcile with the dashboard", () => {
       const cells = line.split('","');
       expect(cells[testIdx]).toContain("false");
     }
+  });
+});
+
+// ── Regressions from the launch-readiness audit ────────────────────────────
+// Each of these failed against 9b72a22. They are the defects an adversarial
+// review of that commit found, pinned so they cannot come back.
+
+describe("a flush can never create or rewrite a session", () => {
+  it("does not create a record for a report the store has never seen", async () => {
+    const s = store();
+    const orphan = newSessionId();
+    const result = await s.appendAssumptionChanges(orphan, [
+      { key: "callHandleMinutes", from: 4, to: 6, direction: "up" },
+    ]);
+    // Reported as fine — there was simply nothing to append to.
+    expect(result.ok).toBe(true);
+    const { sessions } = await s.readAll();
+    // The critical part: no phantom "completed audit" was minted. Share links
+    // are a feature, so a reader leaving someone else's report used to create
+    // a record here and inflate the denominator of every published ratio.
+    expect(sessions).toHaveLength(0);
+  });
+
+  it("never replaces the frozen snapshot or the report, whatever it is handed", async () => {
+    const s = store();
+    const mine = sessionFrom("phone-bottleneck");
+    await s.putSession(mine);
+
+    // The reader opens a colleague's shared report and moves a slider there.
+    await s.appendAssumptionChanges(mine.sessionId, [
+      { key: "callHandleMinutes", from: 4, to: 7, direction: "up" },
+    ]);
+
+    const after = await stored(s, mine.sessionId);
+    expect(after.snapshot).toEqual(mine.snapshot);
+    expect(after.report).toBe(mine.report);
+    expect(after.completedAt).toBe(mine.completedAt);
+    expect(after.assumptionChanges).toHaveLength(1);
+  });
+});
+
+describe("lifecycle marks are atomic", () => {
+  it("a CTA mark and a concurrent session write cannot erase each other", async () => {
+    const s = store();
+    const session = sessionFrom("phone-bottleneck");
+    await s.putSession(session);
+
+    // The exact shape of the race: clicking the CTA fires the mark and, as the
+    // report unmounts, a session write — both in flight at once. Interleave
+    // them so each reads before the other writes.
+    await Promise.all([
+      s.markSession(session.sessionId, { ctaClickedAt: "2026-08-29T10:05:00.000Z" }),
+      s.putSession({ ...session, durationMs: null }),
+    ]);
+
+    const after = await stored(s, session.sessionId);
+    expect(after.ctaClickedAt).toBe("2026-08-29T10:05:00.000Z");
+    expect(after.durationMs).toBe(240_000);
+  });
+
+  it("keeps the first mark when the same one is written twice", async () => {
+    const s = store();
+    const session = sessionFrom("phone-bottleneck");
+    await s.putSession(session);
+    await s.markSession(session.sessionId, { ctaClickedAt: "2026-08-29T10:05:00.000Z" });
+    await s.markSession(session.sessionId, { ctaClickedAt: "2026-08-29T11:00:00.000Z" });
+    expect((await stored(s, session.sessionId)).ctaClickedAt).toBe(
+      "2026-08-29T10:05:00.000Z",
+    );
+  });
+
+  it("a mark that arrives before the session record is not lost", async () => {
+    const s = store();
+    const session = sessionFrom("phone-bottleneck");
+    await s.markSession(session.sessionId, {
+      leadSubmittedAt: "2026-08-29T10:06:00.000Z",
+    });
+    await s.putSession(session);
+    expect((await stored(s, session.sessionId)).leadSubmittedAt).toBe(
+      "2026-08-29T10:06:00.000Z",
+    );
+  });
+
+  it("clearing test records removes their marks too", async () => {
+    const s = store();
+    const test = sessionFrom("phone-bottleneck", { isTest: true });
+    await s.putSession(test);
+    await s.markSession(test.sessionId, { ctaClickedAt: "2026-08-29T10:05:00.000Z" });
+    await s.deleteTestRecords();
+    // Re-create a session with the same id: no ghost mark may attach to it.
+    const reused = sessionFrom("healthy-group", { sessionId: test.sessionId });
+    await s.putSession(reused);
+    expect((await stored(s, reused.sessionId)).ctaClickedAt).toBeNull();
+  });
+});
+
+describe("a failed read is never silently an empty store", () => {
+  it("flags readFailed rather than returning a clean empty result", async () => {
+    const s = store();
+    await s.putSession(sessionFrom("phone-bottleneck"));
+    fake.down = true;
+    const summary = await s.readAll();
+    expect(summary.sessions).toHaveLength(0);
+    expect(summary.readFailed).toBe(true);
+  });
+
+  it("a genuinely empty store is not flagged", async () => {
+    expect((await store().readAll()).readFailed).toBeUndefined();
+  });
+
+  it("refuses to delete test records on the strength of a failed read", async () => {
+    const s = store();
+    fake.down = true;
+    const result = await s.deleteTestRecords();
+    expect(result.ok).toBe(false);
+    expect(result.deleted).toBe(0);
+  });
+});
+
+describe("safeError redacts credentials in any URL scheme", () => {
+  it("does not leak a redis:// password into a rendered error", async () => {
+    const s = new RedisStore("redis://default:s3cr3tpassword@host.upstash.io:6379", "t");
+    // fetch rejects a URL carrying credentials, quoting the whole URL back.
+    const probe = await s.probe();
+    expect(probe.ok).toBe(false);
+    expect(probe.error ?? "").not.toContain("s3cr3tpassword");
+    expect(probe.error ?? "").not.toContain("redis://");
   });
 });

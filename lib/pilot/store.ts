@@ -47,6 +47,11 @@ export interface PilotStore {
     sessionId: string,
     patch: Partial<Pick<PilotSession, "leadSubmittedAt" | "ctaClickedAt">>,
   ): Promise<StoreResult>;
+  /** Appends assumption movements to an existing session. Never creates one. */
+  appendAssumptionChanges(
+    sessionId: string,
+    changes: PilotSession["assumptionChanges"],
+  ): Promise<StoreResult>;
   putOutcome(outcome: DiscoveryOutcome): Promise<StoreResult>;
   getOutcome(sessionId: string): Promise<DiscoveryOutcome | null>;
   /** Everything, for the operator dashboard and exports. Newest first. */
@@ -79,6 +84,9 @@ class NoopStore implements PilotStore {
   async markSession(): Promise<StoreResult> {
     return { ok: true };
   }
+  async appendAssumptionChanges(): Promise<StoreResult> {
+    return { ok: true };
+  }
   async putOutcome(): Promise<StoreResult> {
     return { ok: false, error: "no pilot store configured" };
   }
@@ -105,6 +113,8 @@ class NoopStore implements PilotStore {
 // ── Upstash Redis over REST ─────────────────────────────────────────────────
 
 const META_HASH = "qntm:setup:meta";
+/** Lifecycle marks, one field per (session, mark). Never read-modify-written. */
+const MARK_HASH = "qntm:pilot:marks";
 const SESSION_HASH = "qntm:pilot:sessions";
 const SESSION_INDEX = "qntm:pilot:session_index";
 const OUTCOME_HASH = "qntm:pilot:outcomes";
@@ -223,19 +233,73 @@ class RedisStore implements PilotStore {
     };
   }
 
+  /**
+   * Lifecycle marks live in their own hash, one field per mark, written with
+   * HSETNX — atomic, first-write-wins, and never a read-modify-write.
+   *
+   * They used to live inside the session blob, which made every mark a
+   * read-then-write over the whole record. Clicking the conversion CTA fires
+   * the mark and the report's assumption flush in the same instant, so the two
+   * writers raced over one key: whichever HSET landed second silently
+   * discarded the other's field. With marks in their own field, no two writers
+   * ever touch the same key and the race cannot happen at all.
+   *
+   * A mark is recorded even when the session record itself is absent — a lead
+   * can legitimately arrive for a session stored before the store was
+   * configured — and readAll() overlays it if the record ever appears.
+   */
   async markSession(
     sessionId: string,
     patch: Partial<Pick<PilotSession, "leadSubmittedAt" | "ctaClickedAt">>,
   ): Promise<StoreResult> {
+    const commands: string[][] = [];
+    if (patch.ctaClickedAt)
+      commands.push(["HSETNX", MARK_HASH, `${sessionId}:cta`, patch.ctaClickedAt]);
+    if (patch.leadSubmittedAt)
+      commands.push(["HSETNX", MARK_HASH, `${sessionId}:lead`, patch.leadSubmittedAt]);
+    if (commands.length === 0) return { ok: true };
+    try {
+      await this.pipeline(commands);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: safeError(e) };
+    }
+  }
+
+  /**
+   * Appends assumption movements to an EXISTING session. Update-only by
+   * construction: if the record is absent this is a no-op, not a create.
+   *
+   * The report a reader is looking at is not necessarily their own — share
+   * links are a feature — so a flush that could create a record would mint a
+   * phantom "completed audit" for anyone who opened a shared report, inflating
+   * the denominator of every ratio the stop conditions are read from. It also
+   * never touches the snapshot or the report: the frozen result belongs to the
+   * audit that produced it.
+   */
+  async appendAssumptionChanges(
+    sessionId: string,
+    changes: PilotSession["assumptionChanges"],
+  ): Promise<StoreResult> {
+    if (changes.length === 0) return { ok: true };
     try {
       const [raw] = await this.pipeline([["HGET", SESSION_HASH, sessionId]]);
-      if (typeof raw !== "string") {
-        // A lead can legitimately arrive for a session we never stored, for
-        // example if storage was configured mid-pilot. Not an error.
-        return { ok: true };
+      // No record: nothing to append to. Deliberately not a create.
+      if (typeof raw !== "string") return { ok: true };
+
+      let existing: PilotSession;
+      try {
+        existing = JSON.parse(raw) as PilotSession;
+      } catch {
+        return { ok: false, error: "corrupt session record" };
       }
-      const session = JSON.parse(raw) as PilotSession;
-      const merged: PilotSession = { ...session, ...patch };
+
+      const byKey = new Map(existing.assumptionChanges.map((c) => [c.key, c]));
+      for (const c of changes) byKey.set(c.key, c);
+      const merged: PilotSession = {
+        ...existing,
+        assumptionChanges: [...byKey.values()],
+      };
       await this.pipeline([
         ["HSET", SESSION_HASH, sessionId, JSON.stringify(merged)],
       ]);
@@ -277,7 +341,15 @@ class RedisStore implements PilotStore {
       ])) as [string[], string[]];
 
       const commands: string[][] = [];
-      if (sessionIds.length > 0) commands.push(["HMGET", SESSION_HASH, ...sessionIds]);
+      if (sessionIds.length > 0) {
+        commands.push(["HMGET", SESSION_HASH, ...sessionIds]);
+        // Lifecycle marks live outside the session blob; fetch them alongside.
+        commands.push([
+          "HMGET",
+          MARK_HASH,
+          ...sessionIds.flatMap((id) => [`${id}:cta`, `${id}:lead`]),
+        ]);
+      }
       if (outcomeIds.length > 0) commands.push(["HMGET", OUTCOME_HASH, ...outcomeIds]);
       if (commands.length === 0) return { sessions: [], outcomes: [] };
 
@@ -285,11 +357,17 @@ class RedisStore implements PilotStore {
       let cursor = 0;
       const sessions =
         sessionIds.length > 0 ? parseList<PilotSession>(results[cursor++]) : [];
+      const markValues = sessionIds.length > 0 ? results[cursor++] : null;
       const outcomes =
         outcomeIds.length > 0 ? parseList<DiscoveryOutcome>(results[cursor++]) : [];
-      return { sessions, outcomes };
+
+      return { sessions: overlayMarks(sessions, sessionIds, markValues), outcomes };
     } catch {
-      return { sessions: [], outcomes: [] };
+      // A read failure and a genuinely empty store are indistinguishable to the
+      // caller unless we say so. The physician-facing paths still get an empty
+      // result and carry on; the operator paths (exports, backup) check this
+      // flag rather than shipping a valid-looking empty file.
+      return { sessions: [], outcomes: [], readFailed: true };
     }
   }
 
@@ -317,8 +395,12 @@ class RedisStore implements PilotStore {
 
   async deleteTestRecords(): Promise<{ ok: boolean; deleted: number; error?: string }> {
     try {
-      const { sessions } = await this.readAll();
-      const testIds = sessions
+      const summary = await this.readAll();
+      // Never delete on the strength of a failed read: it would report zero
+      // and look like a clean store.
+      if (summary.readFailed)
+        return { ok: false, deleted: 0, error: "could not read the store" };
+      const testIds = summary.sessions
         .filter((s) => s.isTest === true)
         .map((s) => s.sessionId);
       if (testIds.length === 0) return { ok: true, deleted: 0 };
@@ -329,6 +411,8 @@ class RedisStore implements PilotStore {
         commands.push(["LREM", SESSION_INDEX, "0", id]);
         commands.push(["HDEL", OUTCOME_HASH, id]);
         commands.push(["LREM", OUTCOME_INDEX, "0", id]);
+        commands.push(["HDEL", MARK_HASH, `${id}:cta`]);
+        commands.push(["HDEL", MARK_HASH, `${id}:lead`]);
       }
       await this.pipeline(commands);
       return { ok: true, deleted: testIds.length };
@@ -356,6 +440,31 @@ class RedisStore implements PilotStore {
   }
 }
 
+/**
+ * Folds the marks hash back onto the session records. A mark wins only where
+ * the record has none, so a value already inside a restored backup is kept.
+ */
+function overlayMarks(
+  sessions: PilotSession[],
+  ids: string[],
+  raw: unknown,
+): PilotSession[] {
+  if (!Array.isArray(raw)) return sessions;
+  const cta = new Map<string, string>();
+  const lead = new Map<string, string>();
+  ids.forEach((id, i) => {
+    const c = raw[i * 2];
+    const l = raw[i * 2 + 1];
+    if (typeof c === "string") cta.set(id, c);
+    if (typeof l === "string") lead.set(id, l);
+  });
+  return sessions.map((s) => ({
+    ...s,
+    ctaClickedAt: s.ctaClickedAt ?? cta.get(s.sessionId) ?? null,
+    leadSubmittedAt: s.leadSubmittedAt ?? lead.get(s.sessionId) ?? null,
+  }));
+}
+
 function parseList<T>(raw: unknown): T[] {
   if (!Array.isArray(raw)) return [];
   const out: T[] = [];
@@ -370,10 +479,22 @@ function parseList<T>(raw: unknown): T[] {
   return out;
 }
 
-/** Never leaks a URL or token into a log line. */
+/**
+ * Never leaks a URL or credential into a log line — or, more importantly, into
+ * /internal/setup, which renders these strings.
+ *
+ * Redaction runs BEFORE truncation, and matches any scheme rather than only
+ * http(s): pasting the Upstash `redis://default:<password>@host` connection
+ * string instead of the REST URL makes fetch throw an error quoting the whole
+ * URL, and a truncated-but-unredacted message put 37 characters of that
+ * password on the readiness page.
+ */
 function safeError(e: unknown): string {
   const message = e instanceof Error ? e.message : "unknown";
-  return message.slice(0, 120).replace(/https?:\/\/\S+/g, "[url]");
+  return message
+    .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "[url]")
+    .replace(/\S+@\S+/g, "[redacted]")
+    .slice(0, 120);
 }
 
 // ── Selection ───────────────────────────────────────────────────────────────

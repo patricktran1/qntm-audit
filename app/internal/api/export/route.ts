@@ -30,6 +30,26 @@ export async function GET(request: Request) {
   const includeAll = url.searchParams.get("include") === "all";
 
   const all = await pilotStore().readAll();
+
+  // A failed read returns an empty result, which is byte-for-byte identical to
+  // a genuinely empty store. Emitting it would hand the operator a
+  // valid-looking backup of nothing — and if it replaced last week's copy, the
+  // real one is gone too. Refuse, and say which case this is.
+  if (all.readFailed)
+    return new Response(
+      "The pilot store could not be read, so no export was produced.\n" +
+        "This is a read failure, not an empty store — do not keep this file as a backup.\n" +
+        "Check /internal/setup for store health and try again.\n",
+      {
+        status: 503,
+        headers: {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store, max-age=0",
+          "x-robots-tag": "noindex, nofollow, noarchive",
+        },
+      },
+    );
+
   const stamp = new Date().toISOString().slice(0, 10);
 
   // The backup is not an analytical export: it is the complete dataset, full

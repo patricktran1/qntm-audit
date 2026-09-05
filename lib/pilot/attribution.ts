@@ -51,13 +51,18 @@ const TEST_KEY = "qntm.pilot.test";
  */
 export function sanitizeAttributionValue(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
+  // Truncate BEFORE stripping separators, so the function is idempotent. With
+  // the strip first, a cut landing on a separator left a trailing dash that a
+  // second pass removed — and the value goes through this twice: once in the
+  // campaign builder's preview, once again when it arrives back from the URL.
+  // The preview claimed to be exactly what gets recorded; it wasn't.
   const cleaned = raw
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/-{2,}/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 48);
+    .slice(0, 48)
+    .replace(/^-|-$/g, "");
   return cleaned.length > 0 ? cleaned : undefined;
 }
 

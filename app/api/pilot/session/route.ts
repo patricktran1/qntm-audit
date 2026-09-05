@@ -3,7 +3,7 @@ import { runAudit } from "@/lib/engine/audit";
 import { decodeAnswers } from "@/lib/share";
 import { buildSnapshot } from "@/lib/pilot/snapshot";
 import { pilotStore } from "@/lib/pilot/store";
-import { validateSessionWrite } from "@/lib/pilot/validate";
+import { validateFlushWrite, validateSessionWrite } from "@/lib/pilot/validate";
 import type { PilotSession } from "@/lib/pilot/types";
 import { clientKey, rateLimit } from "@/lib/rate-limit";
 
@@ -36,6 +36,22 @@ export async function POST(request: Request) {
     parsed = JSON.parse(raw);
   } catch {
     return NextResponse.json({ ok: false, error: "malformed" }, { status: 400 });
+  }
+
+  // A flush is an append to a session that already exists — never a create,
+  // and never a rewrite of the frozen result. Routed separately so the two
+  // cases cannot be confused: a reader opening someone else's shared report
+  // must not be able to mint a completed audit under their own session id.
+  if ((parsed as { kind?: unknown } | null)?.kind === "flush") {
+    const flush = validateFlushWrite(parsed);
+    if (!flush.ok)
+      return NextResponse.json({ ok: false, error: flush.error }, { status: 400 });
+    const appended = await pilotStore().appendAssumptionChanges(
+      flush.value.sessionId,
+      flush.value.assumptionChanges,
+    );
+    if (!appended.ok) console.warn("[pilot] flush failed", appended.error);
+    return NextResponse.json({ ok: appended.ok });
   }
 
   const validated = validateSessionWrite(parsed);

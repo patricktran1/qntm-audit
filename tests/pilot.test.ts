@@ -550,3 +550,34 @@ describe("CSV export", () => {
     expect(outcomesCsv([outcome], sessions, false)).toContain('"match"');
   });
 });
+
+describe("attribution sanitisation is idempotent", () => {
+  it("a value that survives one pass survives a second unchanged", () => {
+    // The campaign builder sanitises once for its preview; production
+    // sanitises again when the value arrives back from the URL. If those
+    // disagree, the page's claim that the preview is what gets recorded is
+    // false — which it was, whenever the 48-char cut landed on a separator.
+    const inputs = [
+      "Atlanta Dermatology Society Spring 2026 Meeting Wave 1",
+      "a".repeat(47) + " tail",
+      "x".repeat(48) + "-more",
+      "-".repeat(5) + "lead",
+      "conference follow up 2026",
+      "a b c d e f g h i j k l m n o p q r s t u v w x y z 1 2 3",
+    ];
+    for (const raw of inputs) {
+      const once = sanitizeAttributionValue(raw);
+      expect(sanitizeAttributionValue(once), raw).toBe(once);
+    }
+  });
+
+  it("still bounds length and never starts or ends with a separator", () => {
+    for (const raw of ["Q".repeat(200), "  --spaced out--  ", "a/b/c/".repeat(30)]) {
+      const v = sanitizeAttributionValue(raw);
+      if (v === undefined) continue;
+      expect(v.length).toBeLessThanOrEqual(48);
+      expect(v.startsWith("-")).toBe(false);
+      expect(v.endsWith("-")).toBe(false);
+    }
+  });
+});

@@ -208,7 +208,7 @@ export default async function SetupPage() {
       >
         <div className="space-y-5">
           <TestDeviceToggle />
-          <ClearTestButton testCount={report.counts?.test ?? 0} />
+          <ClearTestButton testCount={report.counts?.deletable ?? 0} />
         </div>
       </Panel>
 

@@ -84,7 +84,7 @@ export function ReportView({
           track({ name: "assumption_changed", key, value, direction });
           // Which assumptions physicians push back on is one of the strongest
           // trust signals we can collect, so it is retained, not only counted.
-          rememberAssumptionChange({
+          rememberAssumptionChange(reportParam, {
             key,
             from: DEFAULT_ASSUMPTIONS[key],
             to: value,
@@ -94,7 +94,7 @@ export function ReportView({
         return { ...prev, [key]: value };
       });
     },
-    [],
+    [reportParam],
   );
 
   // Send accumulated assumption movements when the reader leaves. Dragging a

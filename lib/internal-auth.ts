@@ -13,10 +13,24 @@ import { INTERNAL_COOKIE } from "@/middleware";
 export function internalAuthorised(request: Request): boolean {
   const token = process.env.INTERNAL_ACCESS_TOKEN;
   if (!token) return process.env.NODE_ENV !== "production";
-  const cookie = request.headers.get("cookie") ?? "";
-  const match = new RegExp(`(?:^|;\\s*)${INTERNAL_COOKIE}=([^;]+)`).exec(cookie);
-  if (!match?.[1]) return false;
-  const value = decodeURIComponent(match[1]);
+  // Parse the header the way the middleware's cookie jar does — last
+  // well-formed occurrence wins, malformed pairs are skipped — rather than
+  // regexing the first match. A stale duplicate cookie from another domain
+  // scope used to make the two layers disagree, and an undecodable value threw
+  // a URIError that surfaced as a 500 instead of the intended 404.
+  const header = request.headers.get("cookie") ?? "";
+  let value: string | null = null;
+  for (const pair of header.split(/;\s*/)) {
+    const eq = pair.indexOf("=");
+    if (eq < 0) continue;
+    if (pair.slice(0, eq).trim() !== INTERNAL_COOKIE) continue;
+    try {
+      value = decodeURIComponent(pair.slice(eq + 1));
+    } catch {
+      // Malformed percent-encoding: skip this pair, as the cookie jar does.
+    }
+  }
+  if (value === null) return false;
   if (value.length !== token.length) return false;
   let diff = 0;
   for (let i = 0; i < value.length; i++)

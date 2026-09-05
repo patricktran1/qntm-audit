@@ -244,4 +244,11 @@ export interface DiscoveryOutcome {
 export interface PilotSummary {
   sessions: PilotSession[];
   outcomes: DiscoveryOutcome[];
+  /**
+   * Set when the read itself failed. Absent on success, including a genuinely
+   * empty store. Operator paths that would otherwise emit a valid-looking
+   * empty export must check this; physician-facing paths ignore it and carry
+   * on with nothing, as before.
+   */
+  readFailed?: boolean;
 }

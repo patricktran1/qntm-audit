@@ -80,6 +80,35 @@ export function sanitizeAssumptionChanges(v: unknown): AssumptionChange[] {
   return out;
 }
 
+/**
+ * A flush carries only assumption movements for a session that already exists.
+ * It is declared by the client rather than inferred from a missing field, so
+ * the server never has to guess which of two very different writes it is
+ * looking at.
+ */
+export interface FlushWriteInput {
+  sessionId: string;
+  report: string;
+  assumptionChanges: AssumptionChange[];
+}
+
+export type FlushWriteResult =
+  | { ok: true; value: FlushWriteInput }
+  | { ok: false; error: string };
+
+export function validateFlushWrite(body: unknown): FlushWriteResult {
+  if (typeof body !== "object" || body === null)
+    return { ok: false, error: "malformed" };
+  const b = body as Record<string, unknown>;
+  if (!isSessionId(b.sessionId)) return { ok: false, error: "invalid session id" };
+  const report = boundedText(b.report, 400);
+  if (report.length === 0) return { ok: false, error: "missing report" };
+  const assumptionChanges = sanitizeAssumptionChanges(b.assumptionChanges);
+  if (assumptionChanges.length === 0)
+    return { ok: false, error: "no assumption changes" };
+  return { ok: true, value: { sessionId: b.sessionId, report, assumptionChanges } };
+}
+
 export interface SessionWriteInput {
   sessionId: string;
   report: string;

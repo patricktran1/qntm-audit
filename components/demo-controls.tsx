@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { captureEntry, resetPilotIdentity } from "@/lib/pilot/attribution";
+import { clearAssumptionChanges } from "@/lib/pilot/client";
 
 /**
  * CONFERENCE MODE
@@ -30,6 +31,10 @@ export function DemoControls({ source }: { source: string }) {
         type="button"
         onClick={() => {
           resetPilotIdentity();
+          // Pending movements live in their own key, so the identity reset
+          // alone left the last visitor's slider drags to be attached to the
+          // next visitor's session.
+          clearAssumptionChanges();
           // Re-mark as demo immediately so the booth device never silently
           // becomes "real" traffic after a reset.
           captureEntry(new URLSearchParams({ source }), "demo");
