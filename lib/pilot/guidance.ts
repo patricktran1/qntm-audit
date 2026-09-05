@@ -8,7 +8,8 @@ import {
   verdictDistribution,
   formatRatio,
 } from "./analyse";
-import type { DiscoveryOutcome, PilotSession } from "./types";
+import { funnelInsight } from "./analyse";
+import type { AuditProgress, DiscoveryOutcome, PilotSession } from "./types";
 
 /**
  * WHAT WE SHOULD LEARN NEXT
@@ -37,6 +38,7 @@ export interface Guidance {
 export function pilotGuidance(
   sessions: PilotSession[],
   outcomes: DiscoveryOutcome[],
+  progress: AuditProgress[] = [],
 ): Guidance[] {
   const out: Guidance[] = [];
   const health = pilotHealth(sessions);
@@ -45,7 +47,26 @@ export function pilotGuidance(
   const findings = findingInsight(sessions);
   const assumptions = assumptionChallenges(sessions);
   const calib = calibration(sessions, outcomes);
+  const funnel = funnelInsight(progress);
   const n = health.completedAudits;
+
+  // Abandonment outranks everything below it: if most people never finish, the
+  // completions we do have are a self-selected sample and every rate computed
+  // from them is describing the survivors, not the specialty.
+  if (funnel.starts >= 5 && funnel.abandonment.numerator / funnel.starts >= 0.4) {
+    out.push({
+      id: "questionnaire-abandonment",
+      severity: "blocking",
+      headline: "Most people who start do not finish",
+      evidence: `${formatRatio(funnel.abandonment)} of starts abandoned${
+        funnel.worstStep
+          ? `; the most common stopping point is "${funnel.worstStep.label}" (${funnel.worstStep.stoppedHere} of ${funnel.worstStep.reached} who reached it)`
+          : ""
+      }.`,
+      action:
+        "Read the funnel panel before reading any other rate on this page. Completions are a survivor sample until this is understood — and a question people cannot answer is a finding about the specialty, not only about the form.",
+    });
+  }
 
   // ── Sample size gates everything ─────────────────────────────────────────
   if (n < SMALL_SAMPLE) {

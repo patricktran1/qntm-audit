@@ -146,6 +146,41 @@ export async function flushAssumptionChanges(report: string): Promise<void> {
   if (ok) clearAssumptionChanges();
 }
 
+export interface ProgressInput {
+  furthestIndex: number;
+  /** Answer keys with a value. KEYS ONLY — never pass a value in here. */
+  answeredFields: string[];
+  /** Answer keys marked "I don't know". */
+  unknownFields: string[];
+  isDemo: boolean;
+  completed: boolean;
+}
+
+/**
+ * Records how far this visitor has got. Called on each step advance and once
+ * more when the tab goes away, so an abandoned audit still teaches us where it
+ * was abandoned.
+ *
+ * Fire-and-forget and never awaited by the UI: a storage problem must not put
+ * itself between a physician and the next question.
+ */
+export function recordProgress(input: ProgressInput): void {
+  if (typeof window === "undefined") return;
+  const identity = pilotIdentity();
+  void post("/api/pilot/progress", {
+    sessionId: identity.sessionId,
+    furthestIndex: input.furthestIndex,
+    answeredFields: input.answeredFields,
+    unknownFields: input.unknownFields,
+    variant: currentVariant(),
+    attribution: identity.attribution,
+    entryMode: input.isDemo ? "demo" : identity.entryMode,
+    isDemo: input.isDemo || identity.entryMode === "demo",
+    isTest: identity.isTest,
+    completed: input.completed,
+  });
+}
+
 /** The identity fields a lead submission carries. */
 export function leadIdentity(): {
   sessionId: string;

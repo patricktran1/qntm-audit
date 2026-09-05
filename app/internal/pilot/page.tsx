@@ -20,6 +20,7 @@ import {
   coverageInsight,
   findingInsight,
   formatRatio,
+  funnelInsight,
   isRealSession,
   pilotHealth,
   verdictDistribution,
@@ -140,7 +141,7 @@ export default async function PilotPage({
       : null;
 
   const store = pilotStore();
-  const { sessions, outcomes } = await store.readAll();
+  const { sessions, outcomes, progress } = await store.readAll();
   const outcomeById = new Map(outcomes.map((o) => [o.sessionId, o]));
 
   const health = pilotHealth(sessions);
@@ -149,9 +150,10 @@ export default async function PilotPage({
   const findings = findingInsight(sessions);
   const assumptions = assumptionChallenges(sessions);
   const conversion = conversionBreakdowns(sessions);
-  const guidance = pilotGuidance(sessions, outcomes);
+  const guidance = pilotGuidance(sessions, outcomes, progress);
+  const funnel = funnelInsight(progress);
   const attention = needsAttention(sessions, outcomes);
-  const stops = stopConditions(sessions, outcomes);
+  const stops = stopConditions(sessions, outcomes, progress);
   const triggeredStops = stops.filter((s) => s.triggered);
   const cohorts = knownCohorts(sessions);
   const cohortStats = activeCohort
@@ -526,6 +528,82 @@ export default async function PilotPage({
         )}
       </Panel>
 
+      {/* ── Funnel ────────────────────────────────────────────────────── */}
+      <Panel
+        title="Where the questionnaire loses people"
+        note="Every other panel on this page is computed over completions. This one is the only place that can see the people the questionnaire lost — the difference between a model that is wrong and a form that is too long."
+      >
+        {funnel.starts === 0 ? (
+          <EmptyState>
+            No starts recorded yet. A record is written as soon as someone
+            advances past the first question, whether or not they finish.
+          </EmptyState>
+        ) : (
+          <>
+            <TileGrid>
+              <StatTile label="Started the questionnaire" value={funnel.starts} />
+              <StatTile
+                label="Finished"
+                value={funnel.completions.numerator}
+                detail={formatRatio(funnel.completions)}
+              />
+              <StatTile
+                label="Abandoned"
+                value={funnel.abandonment.numerator}
+                detail={formatRatio(funnel.abandonment)}
+              />
+              <StatTile
+                label="Most common stopping point"
+                value={funnel.worstStep ? funnel.worstStep.stoppedHere : "—"}
+                detail={funnel.worstStep ? funnel.worstStep.label : "nobody has stopped"}
+              />
+            </TileGrid>
+
+            <div className="mt-4">
+              <Table
+                head={["Step", "Reached", "Of all starts", "Stopped here"]}
+                minWidth={560}
+              >
+                {funnel.steps.map((f) => (
+                  <Row key={f.stepId}>
+                    <Cell first>{f.label}</Cell>
+                    <Cell>{f.reached}</Cell>
+                    <Cell>
+                      <RatioCell value={f.reachedRate} />
+                    </Cell>
+                    <Cell muted={f.stoppedHere === 0}>
+                      {f.stoppedHere === 0 ? "—" : f.stoppedHere}
+                    </Cell>
+                  </Row>
+                ))}
+              </Table>
+            </div>
+
+            {funnel.unknownAmongAbandoned.length > 0 ? (
+              <div className="mt-4">
+                <p className="mb-2 text-[12px] uppercase tracking-[0.1em] text-ink-faint">
+                  Marked &ldquo;I don&apos;t know&rdquo; by people who did not finish
+                </p>
+                <Table head={["Question", "Count"]} minWidth={320}>
+                  {funnel.unknownAmongAbandoned.map((u) => (
+                    <Row key={u.field}>
+                      <Cell first>{u.label}</Cell>
+                      <Cell>{u.count}</Cell>
+                    </Row>
+                  ))}
+                </Table>
+              </div>
+            ) : null}
+
+            <p className="mt-3 text-[12.5px] leading-relaxed text-ink-faint">
+              Progress records hold question keys only — never an answer. A
+              visitor who abandons leaves behind where they stopped and nothing
+              about their practice.
+            </p>
+          </>
+        )}
+      </Panel>
+
       {/* ── Coverage ──────────────────────────────────────────────────── */}
       <Panel
         title="Coverage"
@@ -759,9 +837,9 @@ export default async function PilotPage({
           )}
         </Table>
         <p className="mt-3 text-[12.5px] leading-relaxed text-ink-faint">
-          Statuses begin at completion: nothing is written before an audit is
-          finished, so &ldquo;visited&rdquo; and &ldquo;started&rdquo; are not
-          knowable states and are not shown.
+          Statuses begin at completion — a session record exists only once an
+          audit is finished. Everyone who started is in the funnel panel above.
+          Invitations are still not knowable: links are sent by hand.
         </p>
       </Panel>
     </InternalShell>

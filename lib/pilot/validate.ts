@@ -6,6 +6,7 @@ import {
   type Attribution,
   type EntryMode,
 } from "./attribution";
+import { STEPS } from "../engine/questions";
 import {
   AUDIT_ACCURACIES,
   CALL_OUTCOMES,
@@ -15,6 +16,7 @@ import {
   SERVICES,
   type ActualPain,
   type AssumptionChange,
+  type AuditProgress,
   type AuditAccuracy,
   type CallOutcome,
   type DiscoveryOutcome,
@@ -107,6 +109,62 @@ export function validateFlushWrite(body: unknown): FlushWriteResult {
   if (assumptionChanges.length === 0)
     return { ok: false, error: "no assumption changes" };
   return { ok: true, value: { sessionId: b.sessionId, report, assumptionChanges } };
+}
+
+/**
+ * Questionnaire progress. The strictest of the three write validators, because
+ * this endpoint accepts data from a visitor who never chose to finish: only
+ * KNOWN answer keys are kept, and no value ever crosses the boundary.
+ */
+export type ProgressWriteResult =
+  | { ok: true; value: Omit<AuditProgress, "startedAt" | "lastSeenAt"> }
+  | { ok: false; error: string };
+
+export function validateProgressWrite(body: unknown): ProgressWriteResult {
+  if (typeof body !== "object" || body === null)
+    return { ok: false, error: "malformed" };
+  const b = body as Record<string, unknown>;
+  if (!isSessionId(b.sessionId)) return { ok: false, error: "invalid session id" };
+
+  // Number(null) and Number("") are both 0, so an absent index would silently
+  // record "reached the first step". Require the field to be present before
+  // coercing; a numeric string is still accepted, as elsewhere in this file.
+  const rawValue = b.furthestIndex;
+  if (rawValue === null || rawValue === undefined || rawValue === "")
+    return { ok: false, error: "missing step" };
+  const rawIndex = Number(rawValue);
+  if (!Number.isInteger(rawIndex) || rawIndex < 0 || rawIndex >= STEPS.length)
+    return { ok: false, error: "invalid step" };
+  // The step id is derived from the index server-side rather than trusted, so
+  // a crafted request cannot invent a step that does not exist.
+  const furthestStepId = STEPS[rawIndex]!.id;
+
+  const known = new Set<string>();
+  for (const step of STEPS) for (const f of step.fields) known.add(f.key as string);
+  const fieldList = (v: unknown): string[] => {
+    if (!Array.isArray(v)) return [];
+    const out = new Set<string>();
+    for (const item of v.slice(0, 64))
+      if (typeof item === "string" && known.has(item)) out.add(item);
+    return [...out];
+  };
+
+  return {
+    ok: true,
+    value: {
+      sessionId: b.sessionId,
+      furthestIndex: rawIndex,
+      furthestStepId,
+      answeredFields: fieldList(b.answeredFields),
+      unknownFields: fieldList(b.unknownFields),
+      variant: b.variant === "A" || b.variant === "B" ? b.variant : null,
+      attribution: sanitizeAttribution(b.attribution),
+      entryMode: b.entryMode === "demo" ? "demo" : "direct",
+      isDemo: b.isDemo === true || b.entryMode === "demo",
+      isTest: b.isTest === true,
+      completed: b.completed === true,
+    },
+  };
 }
 
 export interface SessionWriteInput {

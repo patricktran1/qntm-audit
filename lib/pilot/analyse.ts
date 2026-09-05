@@ -3,6 +3,7 @@ import { STEPS } from "../engine/questions";
 import type { Category } from "../engine/types";
 import type {
   AuditAccuracy,
+  AuditProgress,
   CallOutcome,
   DiscoveryOutcome,
   EconomicReaction,
@@ -562,5 +563,92 @@ export function calibration(
       .map(([service, count]) => ({ service, count }))
       .sort((a, b) => b.count - a.count),
     serviceAgreement: ratio(serviceAgreed, spoken.length),
+  };
+}
+
+// ── Funnel ──────────────────────────────────────────────────────────────────
+
+/**
+ * Where the questionnaire loses people.
+ *
+ * Until progress records existed, every panel above was computed over
+ * completions only — so a questionnaire that lost six of ten physicians looked
+ * identical to one that was simply sent to four. This is the only place the
+ * pilot can see the difference, and it is the difference between "the audit is
+ * wrong" and "the form is too long", which are opposite responses.
+ */
+export interface FunnelStep {
+  index: number;
+  stepId: string;
+  label: string;
+  /** Starters who reached this step at all. */
+  reached: number;
+  /** Of those, how many got no further. */
+  stoppedHere: number;
+  /** Share of everyone who started, so the columns are comparable. */
+  reachedRate: Ratio;
+}
+
+export interface FunnelInsight {
+  starts: number;
+  completions: Ratio;
+  abandonment: Ratio;
+  steps: FunnelStep[];
+  /** The step that loses the most people. Null when nothing has been lost. */
+  worstStep: FunnelStep | null;
+  /** Questions most often marked "I don't know" by people who did NOT finish. */
+  unknownAmongAbandoned: { field: string; label: string; count: number }[];
+}
+
+export function isRealProgress(p: { isDemo: boolean; isTest?: boolean }): boolean {
+  return !p.isDemo && p.isTest !== true;
+}
+
+export function funnelInsight(progress: AuditProgress[]): FunnelInsight {
+  const real = progress.filter(isRealProgress);
+  const starts = real.length;
+  const completed = real.filter((p) => p.completed).length;
+
+  const steps: FunnelStep[] = STEPS.map((step, index) => {
+    const reached = real.filter((p) => p.furthestIndex >= index).length;
+    // Someone "stopped here" if this was their furthest step and they never
+    // completed. A completion is never a drop, whatever step it ended on.
+    const stoppedHere = real.filter(
+      (p) => !p.completed && p.furthestIndex === index,
+    ).length;
+    return {
+      index,
+      stepId: step.id,
+      label: step.title,
+      reached,
+      stoppedHere,
+      reachedRate: ratio(reached, starts),
+    };
+  });
+
+  const dropped = steps.filter((s) => s.stoppedHere > 0);
+  const worstStep =
+    dropped.length === 0
+      ? null
+      : dropped.reduce((worst, s) => (s.stoppedHere > worst.stoppedHere ? s : worst));
+
+  const unknowns = new Map<string, number>();
+  for (const p of real.filter((x) => !x.completed))
+    for (const f of p.unknownFields) unknowns.set(f, (unknowns.get(f) ?? 0) + 1);
+
+  return {
+    starts,
+    completions: ratio(completed, starts),
+    abandonment: ratio(starts - completed, starts),
+    steps,
+    worstStep,
+    unknownAmongAbandoned: [...unknowns.entries()]
+      .map(([field, count]) => ({
+        field,
+        label: FIELD_LABELS[field] ?? field,
+        count,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6),
   };
 }

@@ -279,7 +279,15 @@ describe("no-op store keeps the product working", () => {
   });
 
   it("reads back empty", async () => {
-    expect(await store.readAll()).toEqual({ sessions: [], outcomes: [] });
+    // Empty, and NOT flagged as a failed read — an unconfigured store is not
+    // a broken one, and the export paths distinguish the two.
+    const summary = await store.readAll();
+    expect(summary).toEqual({ sessions: [], outcomes: [], progress: [] });
+    expect(summary.readFailed).toBeUndefined();
+  });
+
+  it("accepts a progress write without pretending to store it", async () => {
+    expect((await store.putProgress()).ok).toBe(true);
   });
 });
 

@@ -6,7 +6,11 @@ import { isRealSession, pilotHealth } from "@/lib/pilot/analyse";
 import { sessionsCsv, SESSION_COLUMNS } from "@/lib/pilot/export";
 import { buildSnapshot } from "@/lib/pilot/snapshot";
 import { RedisStore, __resetPilotStore } from "@/lib/pilot/store";
-import type { DiscoveryOutcome, PilotSession } from "@/lib/pilot/types";
+import type {
+  AuditProgress,
+  DiscoveryOutcome,
+  PilotSession,
+} from "@/lib/pilot/types";
 import { encodeAnswers } from "@/lib/share";
 
 /**
@@ -683,5 +687,291 @@ describe("safeError redacts credentials in any URL scheme", () => {
     expect(probe.ok).toBe(false);
     expect(probe.error ?? "").not.toContain("s3cr3tpassword");
     expect(probe.error ?? "").not.toContain("redis://");
+  });
+});
+
+// ── Questionnaire funnel ───────────────────────────────────────────────────
+// The pilot could previously only see people who finished, which made its
+// "questionnaire failure" stop condition blind to the commonest failure there
+// is. These pin the record that closes that gap — and pin what it must never
+// contain.
+
+function progressFrom(overrides: Partial<AuditProgress> = {}): AuditProgress {
+  return {
+    sessionId: newSessionId(),
+    startedAt: "2026-08-29T10:00:00.000Z",
+    lastSeenAt: "2026-08-29T10:02:00.000Z",
+    furthestIndex: 2,
+    furthestStepId: "revenue",
+    answeredFields: ["physicians", "apps"],
+    unknownFields: [],
+    variant: "A",
+    attribution: { source: "personal", cohort: "first10" },
+    entryMode: "direct",
+    isDemo: false,
+    isTest: false,
+    completed: false,
+    ...overrides,
+  };
+}
+
+describe("progress records only ever move forward", () => {
+  it("keeps the furthest step when the visitor goes back", async () => {
+    const s = store();
+    const p = progressFrom({ furthestIndex: 5, furthestStepId: "billing" });
+    await s.putProgress(p);
+    await s.putProgress({ ...p, furthestIndex: 1, furthestStepId: "volume" });
+    const { progress } = await s.readAll();
+    expect(progress[0]!.furthestIndex).toBe(5);
+    expect(progress[0]!.furthestStepId).toBe("billing");
+  });
+
+  it("latches completion and keeps the first startedAt", async () => {
+    const s = store();
+    const p = progressFrom();
+    await s.putProgress(p);
+    await s.putProgress({ ...p, startedAt: "2027-01-01T00:00:00.000Z", completed: true });
+    await s.putProgress({ ...p, completed: false });
+    const { progress } = await s.readAll();
+    expect(progress[0]!.completed).toBe(true);
+    expect(progress[0]!.startedAt).toBe("2026-08-29T10:00:00.000Z");
+  });
+
+  it("accumulates answered and unknown fields across writes", async () => {
+    const s = store();
+    const p = progressFrom({ answeredFields: ["physicians"], unknownFields: [] });
+    await s.putProgress(p);
+    await s.putProgress({
+      ...p,
+      answeredFields: ["apps"],
+      unknownFields: ["annualCollections"],
+    });
+    const { progress } = await s.readAll();
+    expect(progress[0]!.answeredFields.sort()).toEqual(["apps", "physicians"]);
+    expect(progress[0]!.unknownFields).toEqual(["annualCollections"]);
+  });
+
+  it("cannot be turned from test or demo back into real evidence", async () => {
+    const s = store();
+    const p = progressFrom({ isTest: true, isDemo: true });
+    await s.putProgress(p);
+    await s.putProgress({ ...p, isTest: false, isDemo: false });
+    const { progress } = await s.readAll();
+    expect(progress[0]!.isTest).toBe(true);
+    expect(progress[0]!.isDemo).toBe(true);
+  });
+
+  it("clearing test records removes a QA abandonment that has no session", async () => {
+    const s = store();
+    const abandoned = progressFrom({ isTest: true });
+    const real = progressFrom();
+    await s.putProgress(abandoned);
+    await s.putProgress(real);
+    const result = await s.deleteTestRecords();
+    expect(result.deleted).toBe(1);
+    const { progress } = await s.readAll();
+    expect(progress.map((p) => p.sessionId)).toEqual([real.sessionId]);
+  });
+});
+
+describe("the funnel answers where the questionnaire loses people", () => {
+  it("separates abandonment from a small invitation list", async () => {
+    const { funnelInsight } = await import("@/lib/pilot/analyse");
+    const rows = [
+      progressFrom({ furthestIndex: 8, completed: true }),
+      progressFrom({ furthestIndex: 8, completed: true }),
+      progressFrom({ furthestIndex: 2, furthestStepId: "revenue" }),
+      progressFrom({ furthestIndex: 2, furthestStepId: "revenue" }),
+      progressFrom({ furthestIndex: 2, furthestStepId: "revenue" }),
+      progressFrom({ furthestIndex: 0, furthestStepId: "providers" }),
+    ];
+    const f = funnelInsight(rows);
+    expect(f.starts).toBe(6);
+    expect(f.completions).toEqual({ numerator: 2, denominator: 6 });
+    expect(f.abandonment).toEqual({ numerator: 4, denominator: 6 });
+    // Three people stopped on the collections question — the actionable fact.
+    expect(f.worstStep?.stepId).toBe("revenue");
+    expect(f.worstStep?.stoppedHere).toBe(3);
+    // Reached counts are cumulative: everyone reached step 0.
+    expect(f.steps[0]!.reached).toBe(6);
+    expect(f.steps[2]!.reached).toBe(5);
+  });
+
+  it("never counts a completion as a drop", async () => {
+    const { funnelInsight } = await import("@/lib/pilot/analyse");
+    const f = funnelInsight([progressFrom({ furthestIndex: 8, completed: true })]);
+    expect(f.worstStep).toBeNull();
+    expect(f.abandonment.numerator).toBe(0);
+  });
+
+  it("excludes demo and test traffic, like every other learning surface", async () => {
+    const { funnelInsight } = await import("@/lib/pilot/analyse");
+    const f = funnelInsight([
+      progressFrom({ completed: true }),
+      progressFrom({ isDemo: true }),
+      progressFrom({ isTest: true }),
+    ]);
+    expect(f.starts).toBe(1);
+  });
+
+  it("fires a blocking guidance rule when most starts are abandoned", async () => {
+    const { pilotGuidance } = await import("@/lib/pilot/guidance");
+    const rows = [
+      ...Array.from({ length: 6 }, () => progressFrom({ furthestIndex: 2 })),
+      ...Array.from({ length: 2 }, () => progressFrom({ furthestIndex: 8, completed: true })),
+    ];
+    const ids = pilotGuidance([], [], rows).map((g) => g.id);
+    expect(ids).toContain("questionnaire-abandonment");
+  });
+
+  it("trips the stop condition, with numerator and denominator", async () => {
+    const { stopConditions } = await import("@/lib/pilot/status");
+    const rows = Array.from({ length: 6 }, () => progressFrom({ furthestIndex: 2 }));
+    const stop = stopConditions([], [], rows).find(
+      (c) => c.id === "questionnaire-abandonment",
+    )!;
+    expect(stop.triggered).toBe(true);
+    expect(stop.evidence).toContain("6 / 6");
+  });
+});
+
+describe("a progress record never carries an answer value", () => {
+  it("drops unknown field names and every value the client sends", async () => {
+    const { validateProgressWrite } = await import("@/lib/pilot/validate");
+    const r = validateProgressWrite({
+      sessionId: "ps_000000000000000000000000",
+      furthestIndex: 2,
+      furthestStepId: "pretend-step",
+      // A hostile or buggy client trying to smuggle values through.
+      answeredFields: ["physicians", "notAField", "annualCollections=5400000"],
+      unknownFields: [{ annualCollections: 5_400_000 }, "daysInAR"],
+      attribution: { source: "Personal" },
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.answeredFields).toEqual(["physicians"]);
+    expect(r.value.unknownFields).toEqual(["daysInAR"]);
+    // The step id is derived server-side, never taken from the request.
+    expect(r.value.furthestStepId).not.toBe("pretend-step");
+    const serialised = JSON.stringify(r.value);
+    expect(serialised).not.toContain("5400000");
+  });
+
+  it("refuses a step index outside the question set", async () => {
+    const { validateProgressWrite } = await import("@/lib/pilot/validate");
+    for (const furthestIndex of [-1, 99, 1.5, null, undefined, NaN, "abc", {}]) {
+      const r = validateProgressWrite({
+        sessionId: "ps_000000000000000000000000",
+        furthestIndex,
+      });
+      expect(r.ok, String(furthestIndex)).toBe(false);
+    }
+  });
+
+  it("coerces a numeric string, matching how the other validators read numbers", async () => {
+    const { validateProgressWrite } = await import("@/lib/pilot/validate");
+    const { STEPS } = await import("@/lib/engine/questions");
+    const r = validateProgressWrite({
+      sessionId: "ps_000000000000000000000000",
+      furthestIndex: "2",
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // Normalised to a number, and the step id still comes from the question
+    // set rather than the request.
+    expect(r.value.furthestIndex).toBe(2);
+    expect(r.value.furthestStepId).toBe(STEPS[2]!.id);
+  });
+
+  it("exports a fixed safe schema — a value column cannot be added silently", async () => {
+    const { progressCsv, PROGRESS_COLUMNS } = await import("@/lib/pilot/export");
+    const { STEPS } = await import("@/lib/engine/questions");
+
+    const csv = progressCsv([
+      progressFrom({
+        answeredFields: ["physicians", "annualCollections"],
+        unknownFields: ["daysInAR"],
+      }),
+    ]);
+    const [header, row] = csv.trim().split("\r\n");
+    const cells = (line: string) =>
+      line.split(",").map((c) => c.replace(/^"|"$/g, ""));
+
+    // The column set is the contract. A digit check would only catch the
+    // values we thought of; this catches any new column at all.
+    expect(cells(header!)).toEqual(PROGRESS_COLUMNS);
+
+    // Answered questions are a COUNT, never a list that could carry values.
+    const idx = PROGRESS_COLUMNS.indexOf("answered_count");
+    expect(cells(row!)[idx]).toBe("2");
+
+    // Unknown questions are keys from the question set, nothing else.
+    const known = new Set(
+      STEPS.flatMap((s) => s.fields.map((f) => String(f.key))),
+    );
+    for (const key of cells(row!)[PROGRESS_COLUMNS.indexOf("unknown_fields")]!
+      .split("|")
+      .filter(Boolean))
+      expect(known.has(key), key).toBe(true);
+  });
+});
+
+describe("an unanswered question is not the same as an unseen one", () => {
+  it("counts only fields the visitor actually reached", async () => {
+    const { STEPS, visibleFields, EMPTY_ANSWERS } = await import(
+      "@/lib/engine/questions"
+    );
+    // Someone who stopped on step 2 having answered steps 0–1.
+    const answers = { ...EMPTY_ANSWERS, physicians: 3, apps: 1 };
+    const furthestIndex = 2;
+    const seen = STEPS.slice(0, furthestIndex + 1).flatMap((s) =>
+      visibleFields(s, answers).map((f) => String(f.key)),
+    );
+    const unknown = seen.filter(
+      (k) => answers[k as keyof typeof answers] === null,
+    );
+
+    // They never reached the phone or technology questions, so those must not
+    // be reported as questions they could not answer.
+    expect(unknown).not.toContain("callsPerDay");
+    expect(unknown).not.toContain("softwareSpendPerMonth");
+    expect(unknown).not.toContain("daysInAR");
+    // But a question on a step they did see, left blank, does count.
+    expect(seen).toContain("clinicalDaysPerWeek");
+    expect(unknown).toContain("clinicalDaysPerWeek");
+  });
+});
+
+describe("progress writes survive a shared IP", () => {
+  it("accepts three audits' worth of writes from one address", async () => {
+    // Ten writes per audit, and a clinic behind one NAT shares a limiter key.
+    // A dropped progress write undercounts STARTS, which is the number this
+    // endpoint exists to make trustworthy — so the ceiling must not be tight.
+    const { resetRateLimits } = await import("@/lib/rate-limit");
+    resetRateLimits();
+    const { POST } = await import("@/app/api/pilot/progress/route");
+
+    const write = (i: number) =>
+      POST(
+        new Request("https://x/api/pilot/progress", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-forwarded-for": "203.0.113.7",
+          },
+          body: JSON.stringify({
+            sessionId: `ps_${String(i).padStart(24, "0")}`,
+            furthestIndex: i % 9,
+            answeredFields: ["physicians"],
+            unknownFields: [],
+            entryMode: "direct",
+          }),
+        }),
+      );
+
+    for (let i = 0; i < 30; i++) {
+      const res = await write(i);
+      expect(res.status, `write ${i}`).toBe(200);
+    }
   });
 });

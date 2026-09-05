@@ -123,7 +123,13 @@ export async function readinessReport(requestHost: string | null): Promise<Readi
     if (!storeProbe.ok)
       blockers.push("The pilot store is configured but the round-trip check failed.");
 
-    const { sessions, outcomes } = await store.readAll();
+    const { sessions, outcomes, progress } = await store.readAll();
+    // Deletion is keyed on the flag across BOTH record kinds: a QA visitor who
+    // abandoned has a progress row and no session, and must still be clearable.
+    const deletableIds = new Set([
+      ...sessions.filter((s) => s.isTest === true).map((s) => s.sessionId),
+      ...progress.filter((p) => p.isTest === true).map((p) => p.sessionId),
+    ]);
     counts = {
       sessions: sessions.length,
       outcomes: outcomes.length,
@@ -133,7 +139,7 @@ export async function readinessReport(requestHost: string | null): Promise<Readi
       test: sessions.filter((s) => s.isTest === true).length,
       // Same predicate deleteTestRecords uses, so the number in the
       // confirmation is the number destroyed.
-      deletable: sessions.filter((s) => s.isTest === true).length,
+      deletable: deletableIds.size,
     };
 
     const rawTest = await store.getMeta("lead_test");

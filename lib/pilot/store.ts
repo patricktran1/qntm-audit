@@ -1,4 +1,9 @@
-import type { DiscoveryOutcome, PilotSession, PilotSummary } from "./types";
+import type {
+  AuditProgress,
+  DiscoveryOutcome,
+  PilotSession,
+  PilotSummary,
+} from "./types";
 
 /**
  * PILOT PERSISTENCE
@@ -52,6 +57,11 @@ export interface PilotStore {
     sessionId: string,
     changes: PilotSession["assumptionChanges"],
   ): Promise<StoreResult>;
+  /**
+   * Upserts questionnaire progress for a visitor who has not necessarily
+   * finished. Monotonic: furthest step only advances, completed only latches.
+   */
+  putProgress(progress: AuditProgress): Promise<StoreResult>;
   putOutcome(outcome: DiscoveryOutcome): Promise<StoreResult>;
   getOutcome(sessionId: string): Promise<DiscoveryOutcome | null>;
   /** Everything, for the operator dashboard and exports. Newest first. */
@@ -87,6 +97,9 @@ class NoopStore implements PilotStore {
   async appendAssumptionChanges(): Promise<StoreResult> {
     return { ok: true };
   }
+  async putProgress(): Promise<StoreResult> {
+    return { ok: true };
+  }
   async putOutcome(): Promise<StoreResult> {
     return { ok: false, error: "no pilot store configured" };
   }
@@ -94,7 +107,7 @@ class NoopStore implements PilotStore {
     return null;
   }
   async readAll(): Promise<PilotSummary> {
-    return { sessions: [], outcomes: [] };
+    return { sessions: [], outcomes: [], progress: [] };
   }
   async probe(): Promise<ProbeResult> {
     return { ok: false, error: "no pilot store configured" };
@@ -119,6 +132,8 @@ const SESSION_HASH = "qntm:pilot:sessions";
 const SESSION_INDEX = "qntm:pilot:session_index";
 const OUTCOME_HASH = "qntm:pilot:outcomes";
 const OUTCOME_INDEX = "qntm:pilot:outcome_index";
+const PROGRESS_HASH = "qntm:pilot:progress";
+const PROGRESS_INDEX = "qntm:pilot:progress_index";
 const TIMEOUT_MS = 6000;
 /** Hard ceiling so a runaway index cannot pull an unbounded payload. */
 const MAX_READ = 2000;
@@ -309,6 +324,57 @@ class RedisStore implements PilotStore {
     }
   }
 
+  async putProgress(progress: AuditProgress): Promise<StoreResult> {
+    try {
+      const merged = await this.mergeProgress(progress);
+      await this.pipeline([
+        ["HSET", PROGRESS_HASH, progress.sessionId, JSON.stringify(merged)],
+        ["LREM", PROGRESS_INDEX, "0", progress.sessionId],
+        ["LPUSH", PROGRESS_INDEX, progress.sessionId],
+        ["LTRIM", PROGRESS_INDEX, "0", String(MAX_READ - 1)],
+      ]);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: safeError(e) };
+    }
+  }
+
+  /**
+   * Progress only ever moves forward. Going back a step, or reloading onto an
+   * earlier one, must not make the record claim less than the visitor reached.
+   */
+  private async mergeProgress(incoming: AuditProgress): Promise<AuditProgress> {
+    const [raw] = await this.pipeline([
+      ["HGET", PROGRESS_HASH, incoming.sessionId],
+    ]);
+    if (typeof raw !== "string") return incoming;
+    let existing: AuditProgress;
+    try {
+      existing = JSON.parse(raw) as AuditProgress;
+    } catch {
+      return incoming;
+    }
+    const forward = incoming.furthestIndex >= existing.furthestIndex;
+    const union = (a: string[], b: string[]) => [...new Set([...a, ...b])];
+    return {
+      ...existing,
+      ...incoming,
+      startedAt: existing.startedAt,
+      furthestIndex: Math.max(existing.furthestIndex, incoming.furthestIndex),
+      furthestStepId: forward ? incoming.furthestStepId : existing.furthestStepId,
+      // A field answered once stays answered even if the visitor clears it,
+      // because the question we are asking is "did anyone get this far".
+      answeredFields: union(existing.answeredFields, incoming.answeredFields),
+      unknownFields: union(existing.unknownFields, incoming.unknownFields),
+      attribution: Object.keys(existing.attribution).length
+        ? existing.attribution
+        : incoming.attribution,
+      isDemo: existing.isDemo || incoming.isDemo,
+      isTest: existing.isTest === true || incoming.isTest === true,
+      completed: existing.completed || incoming.completed,
+    };
+  }
+
   async putOutcome(outcome: DiscoveryOutcome): Promise<StoreResult> {
     try {
       await this.pipeline([
@@ -335,10 +401,11 @@ class RedisStore implements PilotStore {
   async readAll(limit = MAX_READ): Promise<PilotSummary> {
     const capped = Math.min(Math.max(1, limit), MAX_READ);
     try {
-      const [sessionIds, outcomeIds] = (await this.pipeline([
+      const [sessionIds, outcomeIds, progressIds] = (await this.pipeline([
         ["LRANGE", SESSION_INDEX, "0", String(capped - 1)],
         ["LRANGE", OUTCOME_INDEX, "0", String(capped - 1)],
-      ])) as [string[], string[]];
+        ["LRANGE", PROGRESS_INDEX, "0", String(capped - 1)],
+      ])) as [string[], string[], string[]];
 
       const commands: string[][] = [];
       if (sessionIds.length > 0) {
@@ -351,7 +418,9 @@ class RedisStore implements PilotStore {
         ]);
       }
       if (outcomeIds.length > 0) commands.push(["HMGET", OUTCOME_HASH, ...outcomeIds]);
-      if (commands.length === 0) return { sessions: [], outcomes: [] };
+      if (progressIds.length > 0)
+        commands.push(["HMGET", PROGRESS_HASH, ...progressIds]);
+      if (commands.length === 0) return { sessions: [], outcomes: [], progress: [] };
 
       const results = await this.pipeline(commands);
       let cursor = 0;
@@ -360,14 +429,20 @@ class RedisStore implements PilotStore {
       const markValues = sessionIds.length > 0 ? results[cursor++] : null;
       const outcomes =
         outcomeIds.length > 0 ? parseList<DiscoveryOutcome>(results[cursor++]) : [];
+      const progress =
+        progressIds.length > 0 ? parseList<AuditProgress>(results[cursor++]) : [];
 
-      return { sessions: overlayMarks(sessions, sessionIds, markValues), outcomes };
+      return {
+        sessions: overlayMarks(sessions, sessionIds, markValues),
+        outcomes,
+        progress,
+      };
     } catch {
       // A read failure and a genuinely empty store are indistinguishable to the
       // caller unless we say so. The physician-facing paths still get an empty
       // result and carry on; the operator paths (exports, backup) check this
       // flag rather than shipping a valid-looking empty file.
-      return { sessions: [], outcomes: [], readFailed: true };
+      return { sessions: [], outcomes: [], progress: [], readFailed: true };
     }
   }
 
@@ -400,9 +475,14 @@ class RedisStore implements PilotStore {
       // and look like a clean store.
       if (summary.readFailed)
         return { ok: false, deleted: 0, error: "could not read the store" };
-      const testIds = summary.sessions
-        .filter((s) => s.isTest === true)
-        .map((s) => s.sessionId);
+      // A visitor who quit has a progress row and no session, so test ids must
+      // be collected from both or QA abandonments would survive the clear.
+      const testIds = [
+        ...new Set([
+          ...summary.sessions.filter((s) => s.isTest === true).map((s) => s.sessionId),
+          ...summary.progress.filter((p) => p.isTest === true).map((p) => p.sessionId),
+        ]),
+      ];
       if (testIds.length === 0) return { ok: true, deleted: 0 };
 
       const commands: string[][] = [];
@@ -413,6 +493,8 @@ class RedisStore implements PilotStore {
         commands.push(["LREM", OUTCOME_INDEX, "0", id]);
         commands.push(["HDEL", MARK_HASH, `${id}:cta`]);
         commands.push(["HDEL", MARK_HASH, `${id}:lead`]);
+        commands.push(["HDEL", PROGRESS_HASH, id]);
+        commands.push(["LREM", PROGRESS_INDEX, "0", id]);
       }
       await this.pipeline(commands);
       return { ok: true, deleted: testIds.length };

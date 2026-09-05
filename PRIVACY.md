@@ -52,6 +52,20 @@ One `PilotSession` per completed audit:
 - CTA and lead timestamps
 - The encoded answers, so an operator can reopen the exact report
 
+One `AuditProgress` per visitor who reached the questionnaire, **whether or not
+they finished**:
+
+- Session id, timestamps, furthest step reached, and whether it completed
+- Attribution, variant, entry mode, demo/test flags
+- Which question **keys** have an answer, and which were marked "I don't know"
+
+This is the one record we keep for someone who did not choose to finish, so it
+is the strictest: it carries **no answer value of any kind**. We learn that
+"Annual collections" is where people stop; we learn nothing about anyone's
+collections. Enforced at the boundary — the validator keeps only keys that
+exist in the question set and derives the step id server-side — and asserted by
+`tests/workflow.test.ts`.
+
 One `DiscoveryOutcome` per recorded conversation: controlled enum values plus
 three bounded operator notes.
 
@@ -113,6 +127,8 @@ data wherever it is kept.
 ```
 DEL qntm:pilot:sessions qntm:pilot:session_index
 DEL qntm:pilot:outcomes qntm:pilot:outcome_index
+DEL qntm:pilot:progress qntm:pilot:progress_index
+DEL qntm:pilot:marks
 ```
 
 Removing `PILOT_KV_REST_URL` and `PILOT_KV_REST_TOKEN` returns the product to
@@ -130,6 +146,10 @@ HDEL qntm:pilot:sessions <session_id>
 LREM qntm:pilot:session_index 0 <session_id>
 HDEL qntm:pilot:outcomes <session_id>
 LREM qntm:pilot:outcome_index 0 <session_id>
+HDEL qntm:pilot:progress <session_id>
+LREM qntm:pilot:progress_index 0 <session_id>
+HDEL qntm:pilot:marks <session_id>:cta
+HDEL qntm:pilot:marks <session_id>:lead
 ```
 
 **Leads** live wherever the configured sink put them and are deleted there.
@@ -145,6 +165,8 @@ Not policy — tests.
 
 | Property | Where |
 | --- | --- |
+| A progress record never carries an answer value | `tests/workflow.test.ts` |
+| Progress exports contain keys and counts, never values | `tests/workflow.test.ts` |
 | First-touch attribution cannot be overwritten | `tests/workflow.test.ts` |
 | Demo and QA records can never become real pilot data | `tests/workflow.test.ts` |
 | A stored result cannot change retroactively | `tests/workflow.test.ts` |

@@ -13,7 +13,7 @@ import {
 } from "@/lib/analytics";
 import { encodeAnswers } from "@/lib/share";
 import { captureEntry } from "@/lib/pilot/attribution";
-import { recordCompletedAudit } from "@/lib/pilot/client";
+import { recordCompletedAudit, recordProgress } from "@/lib/pilot/client";
 import {
   EMPTY_ANSWERS,
   isStepComplete,
@@ -36,6 +36,9 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
   // Tracks how far the visitor actually got, so an abandon event distinguishes
   // "left on screen 2" from "went back to screen 2 after reaching screen 8".
   const furthest = useRef(0);
+  // The pagehide handler must read the latest answers without re-binding the
+  // listener on every keystroke.
+  const answersRef = useRef<AuditAnswers>(EMPTY_ANSWERS);
 
   // Restore a draft, or load a demo profile when one is requested.
   useEffect(() => {
@@ -81,25 +84,53 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
     }
   }, [answers, index, hydrated]);
 
+  // Where this visitor got to, in question KEYS only — never values. Without
+  // it the pilot can only see the people the questionnaire did not lose, which
+  // makes its "questionnaire failure" stop condition blind to the most common
+  // failure there is. See lib/pilot/types.ts (AuditProgress) and PRIVACY.md.
+  const reportProgress = useCallback(
+    (reachedIndex: number, final: AuditAnswers, completed: boolean) => {
+      const furthestIndex = Math.max(furthest.current, reachedIndex);
+      // Only questions this visitor actually SAW can be counted as unanswered.
+      // A field they never reached is not an "I don't know" — conflating the
+      // two would make the funnel report that people could not answer
+      // questions the questionnaire never showed them.
+      const seen = STEPS.slice(0, furthestIndex + 1).flatMap((s) =>
+        visibleFields(s, final).map((f) => f.key),
+      );
+      recordProgress({
+        furthestIndex,
+        answeredFields: seen.filter((k) => final[k] !== null).map(String),
+        unknownFields: seen.filter((k) => final[k] === null).map(String),
+        isDemo: Boolean(demoId),
+        completed,
+      });
+    },
+    [demoId],
+  );
+
   // Record abandonment when the tab closes mid-audit.
   useEffect(() => {
     const onHide = () => {
       if (reported.current) return;
       const step = STEPS[index];
-      if (step)
+      if (step) {
         track({
           name: "audit_abandoned",
           step: step.id,
           index,
           furthestIndex: furthest.current,
         });
+        reportProgress(index, answersRef.current, false);
+      }
     };
     window.addEventListener("pagehide", onHide);
     return () => window.removeEventListener("pagehide", onHide);
-  }, [index]);
+  }, [index, reportProgress]);
 
   const step = STEPS[index]!;
   const fields = useMemo(() => visibleFields(step, answers), [step, answers]);
+
   const canAdvance = isStepComplete(step, answers);
   const isLast = index === STEPS.length - 1;
 
@@ -129,6 +160,8 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
         durationMs,
         isDemo: Boolean(demoId),
       });
+      // Latches the funnel record so a completion is never counted as a drop.
+      reportProgress(STEPS.length - 1, final, true);
       try {
         window.sessionStorage.removeItem(DRAFT_KEY);
       } catch {
@@ -136,7 +169,7 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
       }
       router.push(`/results?a=${encodeURIComponent(encodeAnswers(final))}`);
     },
-    [router, demoId],
+    [router, demoId, reportProgress],
   );
 
   const next = useCallback(() => {
@@ -149,14 +182,21 @@ export function AuditFlow({ demoId }: { demoId?: string }) {
     );
     track({ name: "screen_completed", step: step.id, index, skipped });
     if (isLast) finish(answers);
-    else setIndex((i) => i + 1);
-  }, [answers, canAdvance, fields, finish, index, isLast, step.id]);
+    else {
+      reportProgress(index + 1, answers, false);
+      setIndex((i) => i + 1);
+    }
+  }, [answers, canAdvance, fields, finish, index, isLast, reportProgress, step.id]);
 
   const back = useCallback(() => setIndex((i) => Math.max(0, i - 1)), []);
 
   useEffect(() => {
     furthest.current = Math.max(furthest.current, index);
   }, [index]);
+
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
 
   // Cmd/Ctrl+Enter advances from anywhere on the step.
   useEffect(() => {

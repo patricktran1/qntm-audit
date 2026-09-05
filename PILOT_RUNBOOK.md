@@ -83,12 +83,16 @@ Capture it, thank them, change nothing.
 Five minutes, one page — `/internal/pilot`:
 
 1. **Needs attention** — work it to empty. Leads awaiting response first.
-2. **Stop conditions** — if one is firing, take it seriously: it was
+2. **Where the questionnaire loses people** — read this before any other rate.
+   Everything else on the page is computed over completions, so if most people
+   are abandoning, those figures describe the survivors rather than the
+   specialty.
+3. **Stop conditions** — if one is firing, take it seriously: it was
    calibrated in advance precisely so it cannot be argued with in the
    moment. Pause new outreach while you understand it.
-3. Glance at completions and outstanding outcomes. If outcomes lag leads by
+4. Glance at completions and outstanding outcomes. If outcomes lag leads by
    more than a couple, stop sending links and go record conversations.
-4. Weekly: download `/internal/api/export?kind=backup` and keep it somewhere
+5. Weekly: download `/internal/api/export?kind=backup` and keep it somewhere
    safe.
 
 If the dashboard itself misbehaves, `/internal/setup` first — it will tell
@@ -101,9 +105,10 @@ Sit down with `/internal/pilot` (cohort view: `first10`),
 
 1. **Verdict distribution** — did the audit ever say "healthy"? A pilot where
    every practice must act is evidence about the model, not the specialty.
-2. **Coverage** — which questions could real dermatologists not answer? A
-   question nobody can answer is a questionnaire defect, whatever the model
-   thinks of it.
+2. **Coverage and abandonment** — which questions could real dermatologists not
+   answer, and where did the ones who quit stop? A question nobody can answer
+   is a questionnaire defect, whatever the model thinks of it, and the step
+   that loses the most people is the cheapest thing on this list to fix.
 3. **topCategory distribution** — is one detector headlining implausibly
    often?
 4. **Assumption changes** — which priors did physicians move, and which way?
@@ -141,4 +146,4 @@ fails the test suite — that is intentional.
 | `/internal/call?s=…` | One-screen instrument panel for a discovery call |
 | `/internal/brief?a=…&s=…` | Full pre-call intelligence + outcome form |
 | `/internal/calibration` | Predictions vs. what the calls actually said |
-| `/internal/api/export` | CSVs (`kind=sessions`, `kind=outcomes`) and JSON backup (`kind=backup`) |
+| `/internal/api/export` | CSVs (`kind=sessions`, `kind=outcomes`, `kind=progress`) and JSON backup (`kind=backup`) |

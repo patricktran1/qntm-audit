@@ -97,6 +97,44 @@ export interface PilotSession {
   report: string;
 }
 
+/**
+ * How far a visitor got through the questionnaire, whether or not they
+ * finished.
+ *
+ * The pilot exists to learn where the audit fails, and it has a stop condition
+ * named "questionnaire failure" — but nothing was written until an audit
+ * COMPLETED, so the most common failure of all was invisible: people who start
+ * and quit. A dashboard reading "4 completed audits" could not distinguish
+ * four invitations from forty.
+ *
+ * Deliberately carries NO ANSWER VALUES — only which question keys have been
+ * answered and which were marked "I don't know". That is the same shape as
+ * AuditSnapshot.skippedFields, and it is what makes this safe to keep for a
+ * visitor who never chose to finish: we learn that "Days in A/R" loses people
+ * without learning anyone's days in A/R.
+ */
+export interface AuditProgress {
+  sessionId: string;
+  /** ISO. First time this session was seen mid-audit. */
+  startedAt: string;
+  lastSeenAt: string;
+  /** 0-based index of the furthest step reached. Only ever increases. */
+  furthestIndex: number;
+  /** Step id at that index, so a reordered question set stays readable. */
+  furthestStepId: string;
+  /** Answer KEYS with a value so far. Never the values themselves. */
+  answeredFields: string[];
+  /** Answer keys explicitly marked "I don't know". */
+  unknownFields: string[];
+  variant: "A" | "B" | null;
+  attribution: Attribution;
+  entryMode: EntryMode;
+  isDemo: boolean;
+  isTest: boolean;
+  /** One-way: set when the audit was completed. */
+  completed: boolean;
+}
+
 // ── Discovery outcomes ──────────────────────────────────────────────────────
 
 export type CallOutcome =
@@ -244,6 +282,8 @@ export interface DiscoveryOutcome {
 export interface PilotSummary {
   sessions: PilotSession[];
   outcomes: DiscoveryOutcome[];
+  /** One per visitor who reached the questionnaire, finished or not. */
+  progress: AuditProgress[];
   /**
    * Set when the read itself failed. Absent on success, including a genuinely
    * empty store. Operator paths that would otherwise emit a valid-looking

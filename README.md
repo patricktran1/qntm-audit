@@ -42,7 +42,7 @@ app/
   internal/calibration/    predicted pain vs. what discovery calls said
   internal/events/         session event log, for verifying the funnel
   internal/api/            gated: outcome writes, exports, test lead, clear test
-  api/pilot/               public: session write, CTA mark
+  api/pilot/               public: session write, questionnaire progress, CTA mark
   api/events/              analytics sink (no-op unless a webhook is configured)
   api/lead/                lead delivery (accepts and logs when unconfigured)
 lib/

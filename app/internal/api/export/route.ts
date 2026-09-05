@@ -1,6 +1,6 @@
 import { MODEL_VERSION } from "@/lib/engine/version";
-import { isRealSession } from "@/lib/pilot/analyse";
-import { outcomesCsv, sessionsCsv } from "@/lib/pilot/export";
+import { isRealProgress, isRealSession } from "@/lib/pilot/analyse";
+import { outcomesCsv, progressCsv, sessionsCsv } from "@/lib/pilot/export";
 import { pilotStore } from "@/lib/pilot/store";
 import { internalAuthorised } from "@/lib/internal-auth";
 
@@ -21,7 +21,13 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const kindParam = url.searchParams.get("kind");
   const kind =
-    kindParam === "outcomes" ? "outcomes" : kindParam === "backup" ? "backup" : "sessions";
+    kindParam === "outcomes"
+      ? "outcomes"
+      : kindParam === "backup"
+        ? "backup"
+        : kindParam === "progress"
+          ? "progress"
+          : "sessions";
   const includeNotes = url.searchParams.get("notes") === "1";
   // The encoded report carries raw practice figures, so it is opt-in.
   const includeReport = url.searchParams.get("full") === "1";
@@ -63,6 +69,7 @@ export async function GET(request: Request) {
         modelVersion: MODEL_VERSION,
         sessions: all.sessions,
         outcomes: all.outcomes,
+        progress: all.progress,
       },
       null,
       2,
@@ -93,7 +100,11 @@ export async function GET(request: Request) {
   const body =
     kind === "outcomes"
       ? outcomesCsv(outcomes, sessions, includeNotes)
-      : sessionsCsv(sessions, includeReport);
+      : kind === "progress"
+        ? progressCsv(
+            includeAll ? all.progress : all.progress.filter(isRealProgress),
+          )
+        : sessionsCsv(sessions, includeReport);
 
   return new Response(body, {
     headers: {

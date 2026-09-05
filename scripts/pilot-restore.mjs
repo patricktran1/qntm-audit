@@ -22,6 +22,8 @@ const SESSION_HASH = "qntm:pilot:sessions";
 const SESSION_INDEX = "qntm:pilot:session_index";
 const OUTCOME_HASH = "qntm:pilot:outcomes";
 const OUTCOME_INDEX = "qntm:pilot:outcome_index";
+const PROGRESS_HASH = "qntm:pilot:progress";
+const PROGRESS_INDEX = "qntm:pilot:progress_index";
 
 const args = process.argv.slice(2);
 const yes = args.includes("--yes");
@@ -55,15 +57,22 @@ if (backup.format !== "qntm-pilot-backup" || backup.version !== 1)
 
 const sessions = Array.isArray(backup.sessions) ? backup.sessions : [];
 const outcomes = Array.isArray(backup.outcomes) ? backup.outcomes : [];
+// Progress arrived after backup format 1 shipped, so it may be absent.
+const progress = Array.isArray(backup.progress) ? backup.progress : [];
 const isId = (v) => typeof v === "string" && /^ps_[0-9a-f]{24}$/.test(v);
 const badSessions = sessions.filter((s) => !isId(s.sessionId)).length;
 const badOutcomes = outcomes.filter((o) => !isId(o.sessionId)).length;
-if (badSessions || badOutcomes)
-  fail(`Backup contains malformed ids (${badSessions} sessions, ${badOutcomes} outcomes). Refusing.`);
+const badProgress = progress.filter((p) => !isId(p.sessionId)).length;
+if (badSessions || badOutcomes || badProgress)
+  fail(
+    `Backup contains malformed ids (${badSessions} sessions, ${badOutcomes} outcomes, ${badProgress} progress). Refusing.`,
+  );
 
 console.log(`Backup ${file}`);
 console.log(`  exported ${backup.exportedAt} under model ${backup.modelVersion}`);
-console.log(`  ${sessions.length} sessions, ${outcomes.length} outcomes`);
+console.log(
+  `  ${sessions.length} sessions, ${outcomes.length} outcomes, ${progress.length} progress`,
+);
 console.log(
   `  restore overwrites any existing record sharing an id; records only in the store are kept`,
 );
@@ -96,6 +105,8 @@ try {
     writes.push(["HSET", SESSION_HASH, s.sessionId, JSON.stringify(s)]);
   for (const o of outcomes)
     writes.push(["HSET", OUTCOME_HASH, o.sessionId, JSON.stringify(o)]);
+  for (const p of progress)
+    writes.push(["HSET", PROGRESS_HASH, p.sessionId, JSON.stringify(p)]);
   for (let i = 0; i < writes.length; i += 100)
     await pipeline(writes.slice(i, i + 100));
 
@@ -112,15 +123,21 @@ try {
       ["LREM", OUTCOME_INDEX, "0", o.sessionId],
       ["LPUSH", OUTCOME_INDEX, o.sessionId],
     );
+  for (const p of [...progress].reverse())
+    indexCommands.push(
+      ["LREM", PROGRESS_INDEX, "0", p.sessionId],
+      ["LPUSH", PROGRESS_INDEX, p.sessionId],
+    );
   for (let i = 0; i < indexCommands.length; i += 100)
     await pipeline(indexCommands.slice(i, i + 100));
 
-  const [sessionCount, outcomeCount] = await pipeline([
+  const [sessionCount, outcomeCount, progressCount] = await pipeline([
     ["LLEN", SESSION_INDEX],
     ["LLEN", OUTCOME_INDEX],
+    ["LLEN", PROGRESS_INDEX],
   ]);
   console.log(
-    `✓ Restored. Store now indexes ${sessionCount} sessions and ${outcomeCount} outcomes.`,
+    `✓ Restored. Store now indexes ${sessionCount} sessions, ${outcomeCount} outcomes and ${progressCount} progress records.`,
   );
 } catch (e) {
   fail(`Restore failed: ${String(e.message).replace(/https?:\/\/\S+/g, "[url]")}`);

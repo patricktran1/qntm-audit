@@ -1,5 +1,5 @@
 
-import type { DiscoveryOutcome, PilotSession } from "./types";
+import type { AuditProgress, DiscoveryOutcome, PilotSession } from "./types";
 
 /**
  * CSV EXPORT
@@ -181,4 +181,53 @@ export function outcomesCsv(
       : base;
   });
   return toCsv(columns, rows);
+}
+
+export const PROGRESS_COLUMNS = [
+  "session_id",
+  "started_at",
+  "last_seen_at",
+  "furthest_index",
+  "furthest_step",
+  "completed",
+  "variant",
+  "source",
+  "campaign",
+  "cohort",
+  "ref",
+  "entry_mode",
+  "is_demo",
+  "is_test",
+  "answered_count",
+  "unknown_fields",
+];
+
+/**
+ * Questionnaire progress, including everyone who never finished. Carries
+ * question KEYS and counts only — there is no answer value in this file,
+ * which is what makes it safe to hold for a visitor who did not choose to
+ * complete the audit.
+ */
+export function progressCsv(rows: AuditProgress[]): string {
+  return toCsv(
+    PROGRESS_COLUMNS,
+    rows.map((p) => [
+      p.sessionId,
+      p.startedAt,
+      p.lastSeenAt,
+      p.furthestIndex,
+      p.furthestStepId,
+      p.completed ? "true" : "false",
+      p.variant ?? "",
+      p.attribution.source ?? "",
+      p.attribution.campaign ?? "",
+      p.attribution.cohort ?? "",
+      p.attribution.ref ?? "",
+      p.entryMode,
+      p.isDemo ? "true" : "false",
+      p.isTest === true ? "true" : "false",
+      p.answeredFields.length,
+      p.unknownFields.join("|"),
+    ]),
+  );
 }

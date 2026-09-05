@@ -1,5 +1,11 @@
-import { isRealSession, ratio, formatRatio, type Ratio } from "./analyse";
-import type { DiscoveryOutcome, PilotSession } from "./types";
+import {
+  funnelInsight,
+  isRealSession,
+  ratio,
+  formatRatio,
+  type Ratio,
+} from "./analyse";
+import type { AuditProgress, DiscoveryOutcome, PilotSession } from "./types";
 
 /**
  * PILOT OPERATIONS
@@ -8,12 +14,14 @@ import type { DiscoveryOutcome, PilotSession } from "./types";
  * the first cohort. Everything here is a pure function of the stored records:
  * no AI, no scoring, no memory. If a rule fires, its evidence is attached.
  *
- * A deliberate limitation, stated rather than papered over: the pilot only
- * writes a record when an audit is COMPLETED. "Visited" and "started" are not
- * knowable states — there is no server write before completion, by design —
- * so this machine starts at completed and never fabricates the steps before
- * it. Invitation counts are not knowable either: links are generated and sent
- * by hand, outside the product.
+ * The session status machine starts at COMPLETED: a session record exists only
+ * once an audit is finished. Everything before that lives in the separate
+ * progress record (see funnelInsight), which is what makes abandonment
+ * visible without pretending an unfinished audit is a session.
+ *
+ * One limitation remains, stated rather than papered over: invitation counts
+ * are not knowable. Links are generated and sent by hand, outside the product,
+ * so the funnel begins at "started the questionnaire", never at "was invited".
  */
 
 // ── Session status ──────────────────────────────────────────────────────────
@@ -248,6 +256,7 @@ const pausePhrase = "Consider pausing expansion and reviewing this before the ne
 export function stopConditions(
   sessions: PilotSession[],
   outcomes: DiscoveryOutcome[],
+  progress: AuditProgress[] = [],
 ): StopCondition[] {
   const real = sessions.filter(isRealSession);
   const outcomeById = new Map(outcomes.map((o) => [o.sessionId, o]));
@@ -297,8 +306,23 @@ export function stopConditions(
   const orphanOutcomes = outcomes.filter((o) => !sessionIds.has(o.sessionId)).length;
 
   const fmt = (r: Ratio) => formatRatio(r);
+  const funnel = funnelInsight(progress);
 
   return [
+    {
+      id: "questionnaire-abandonment",
+      triggered: funnel.starts >= 5 && funnel.abandonment.numerator / funnel.starts >= 0.5,
+      title: "Questionnaire abandonment",
+      evidence:
+        funnel.starts === 0
+          ? "No starts recorded yet."
+          : `${fmt(funnel.abandonment)} of people who started never finished.${
+              funnel.worstStep
+                ? ` Most stopped at "${funnel.worstStep.label}" (${funnel.worstStep.stoppedHere}).`
+                : ""
+            }`,
+      threshold: `Guardrail: abandonment ≥ 50% of ≥5 starts. More outreach into a questionnaire that loses half its readers buys more abandonment, not more evidence. ${pausePhrase}`,
+    },
     {
       id: "model-bias",
       triggered:
